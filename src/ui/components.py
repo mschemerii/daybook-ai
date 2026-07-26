@@ -26,38 +26,112 @@ def page_header(title: str, subtitle: str = "") -> None:
         st.caption(subtitle)
 
 
-def task_card(task, reason: str | None = None, on_open: Callable[[int], None] | None = None, key_prefix: str = "task") -> None:
-    """Render an accessible task card with an explicit task-opening control."""
-    priority_icon, priority_class = PRIORITY_META.get(task.priority, ("•", "priority-low"))
-    status_icon, status_class = STATUS_META.get(task.status, ("•", "status-open"))
-    due = task.due_date.isoformat() if task.due_date else "No due date"
+def task_card(
+    task,
+    rule_explanation: str | None = None,
+    on_open=None,
+    key_prefix: str = "task",
+    on_reopen=None,
+) -> None:
+    """Render an accessible task card with optional task actions.
+
+    ``on_open`` receives the task ID when the Open task button is selected.
+    ``on_reopen`` receives the task ID when the Reopen button is selected.
+    """
+    priority_classes = {
+        "High": ("▲", "priority-high"),
+        "Medium": ("●", "priority-medium"),
+        "Low": ("▼", "priority-low"),
+    }
+    status_classes = {
+        "Open": ("○", "status-open"),
+        "In Progress": ("◐", "status-progress"),
+        "Blocked": ("■", "status-blocked"),
+        "Completed": ("✓", "status-completed"),
+    }
+
+    priority_icon, priority_class = priority_classes.get(
+        task.priority,
+        ("•", "priority-medium"),
+    )
+    status_icon, status_class = status_classes.get(
+        task.status,
+        ("•", "status-open"),
+    )
+
+    due_text = (
+        task.due_date.isoformat()
+        if task.due_date is not None
+        else "No due date"
+    )
 
     with st.container(border=True):
-        title_col, open_col = st.columns([5, 1.25], vertical_alignment="center")
-        title_col.markdown(f"### {escape(task.title)}")
-        if on_open and task.id is not None:
-            open_col.button(
-                "Open task",
-                key=f"{key_prefix}_open_{task.id}",
-                use_container_width=True,
-                on_click=on_open,
-                args=(task.id,),
-                help=f"Open and edit {task.title}",
-            )
+        st.markdown(f"#### {task.title}")
 
         st.markdown(
-            f'<div class="task-meta">'
-            f'<span class="task-badge {priority_class}">{priority_icon} Priority: {escape(task.priority)}</span>'
-            f'<span class="task-badge {status_class}">{status_icon} Status: {escape(task.status)}</span>'
-            f'<span class="task-badge due-badge">◷ Due: {escape(due)}</span>'
-            f'</div>',
+            f"""
+            <div class="task-meta">
+                <span class="task-badge {priority_class}">
+                    {priority_icon} Priority: {task.priority}
+                </span>
+                <span class="task-badge {status_class}">
+                    {status_icon} Status: {task.status}
+                </span>
+                <span class="task-badge due-badge">
+                    Due: {due_text}
+                </span>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
         if task.description:
             st.write(task.description)
-        if reason:
+
+        if task.source:
+            st.caption(f"Source: {task.source}")
+
+        if rule_explanation:
             st.markdown(
-                f'<div class="rule-explanation"><strong>Selected by application rules:</strong> {escape(reason)}</div>',
+                f"""
+                <div class="rule-explanation">
+                    <strong>Selected by application rules:</strong>
+                    {rule_explanation}
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
+
+        actions = []
+
+        if on_open is not None:
+            actions.append("open")
+
+        if on_reopen is not None and task.status == "Completed":
+            actions.append("reopen")
+
+        if actions:
+            columns = st.columns(len(actions))
+
+            column_index = 0
+
+            if "open" in actions:
+                if columns[column_index].button(
+                    "Open task",
+                    key=f"{key_prefix}_open_{task.id}",
+                    use_container_width=True,
+                ):
+                    on_open(task.id)
+                    st.rerun()
+
+                column_index += 1
+
+            if "reopen" in actions:
+                if columns[column_index].button(
+                    "Reopen",
+                    key=f"{key_prefix}_reopen_{task.id}",
+                    use_container_width=True,
+                ):
+                    on_reopen(task.id)
+                    st.success("Task reopened.")
+                    st.rerun()
