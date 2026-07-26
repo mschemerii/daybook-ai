@@ -6,7 +6,6 @@ from datetime import date
 from pathlib import Path
 
 import streamlit as st
-import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 from src.agent.local_llm import LocalModelClient, LocalModelError
@@ -18,6 +17,7 @@ from src.repositories.task_repository import TaskRepository
 from src.services.context_service import ContextService
 from src.services.task_service import TaskService
 from src.ui.components import page_header, task_card
+from src.utils.dates import format_date
 
 load_dotenv()
 st.set_page_config(page_title="Daybook AI", page_icon="📘", layout="wide", initial_sidebar_state="collapsed")
@@ -41,16 +41,27 @@ tasks, journals, governance, task_service, context_service, llm = services()
 
 if "page" not in st.session_state:
     st.session_state.page = "Today"
+
 if "selected_task_id" not in st.session_state:
     st.session_state.selected_task_id = None
-if "navigation_radio" not in st.session_state:
+
+if "pending_page" not in st.session_state:
+    st.session_state.pending_page = None
+
+pending_page = st.session_state.pending_page
+
+if pending_page is not None:
+    st.session_state.page = pending_page
+    st.session_state.navigation_radio = pending_page
+    st.session_state.pending_page = None
+elif "navigation_radio" not in st.session_state:
     st.session_state.navigation_radio = st.session_state.page
 
 
 def open_task(task_id: int) -> None:
+    """Queue navigation to the selected task on the next rerun."""
     st.session_state.selected_task_id = task_id
-    st.session_state.page = "Tasks"
-    st.session_state.navigation_radio = "Tasks"
+    st.session_state.pending_page = "Tasks"
 
 
 def close_task() -> None:
@@ -63,9 +74,9 @@ def reopen_task(task_id: int) -> None:
 
 
 def navigate_to(page_name: str) -> None:
-    """Change pages from a widget callback before navigation is rendered."""
-    st.session_state.page = page_name
-    st.session_state.navigation_radio = page_name
+    """Queue navigation until the next Streamlit rerun."""
+    st.session_state.pending_page = page_name
+
     if page_name != "Tasks":
         st.session_state.selected_task_id = None
 
@@ -94,21 +105,27 @@ st.markdown(
     border-width: 2px;
     border-color: #0072B2;
 }
-.st-key-global_shutdown_button {
+.shutdown-link-wrap {
     display:flex;
     justify-content:flex-end;
     align-items:center;
     padding-top:.2rem;
 }
-.st-key-global_shutdown_button button {
+.shutdown-link {
+    display:inline-flex;
+    width:100%;
     min-height:2.45rem;
+    align-items:center;
+    justify-content:center;
     border-radius:.55rem;
     border:1px solid color-mix(in srgb, #D55E00 70%, var(--text-color));
-    color:var(--text-color);
+    color:var(--text-color) !important;
     background:color-mix(in srgb, #D55E00 12%, var(--background-color));
     font-weight:650;
+    text-decoration:none !important;
+    padding:.45rem .75rem;
 }
-.st-key-global_shutdown_button button:hover {
+.shutdown-link:hover {
     border-color:#D55E00;
     background:color-mix(in srgb, #D55E00 20%, var(--background-color));
 }
@@ -170,11 +187,23 @@ with st.container(key="top_navigation"):
         )
 
     with shutdown_column:
-        shutdown_clicked = st.button(
-            "⏻ Shut down",
-            key="global_shutdown_button",
-            use_container_width=True,
-            help="Close Daybook AI and stop locally started services.",
+        shutdown_url = f"{CONTROLLER_URL.rstrip('/')}/shutdown"
+
+        st.markdown(
+            f"""
+            <div class="shutdown-link-wrap">
+                <a
+                    class="shutdown-link"
+                    href="{shutdown_url}"
+                    target="_top"
+                    aria-label="Shut down Daybook AI"
+                    title="Close Daybook AI and stop locally started services"
+                >
+                    ⏻ Shut down
+                </a>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
     page = st.radio(
@@ -191,32 +220,8 @@ with st.container(key="top_navigation"):
             st.session_state.selected_task_id = None
         st.rerun()
 
-    if shutdown_clicked:
-        st.session_state.shutdown_redirect = True
-        st.rerun()
 
 page = st.session_state.page
-
-if st.session_state.get("shutdown_redirect", False):
-    st.markdown("## Daybook AI is shutting down")
-    st.write(
-        "You are being moved to the application shutdown page."
-    )
-    st.caption(
-        "Streamlit and the local AI server started by Daybook AI "
-        "will then stop safely."
-    )
-
-    shutdown_url = f"{CONTROLLER_URL.rstrip('/')}/shutdown"
-    components.html(
-        f"""
-        <script>
-          window.top.location.replace({shutdown_url!r});
-        </script>
-        """,
-        height=0,
-    )
-    st.stop()
 
 if page == "Today":
     page_header("Today", "A compact, actionable view before focused work begins.")
@@ -354,7 +359,7 @@ elif page == "Daily Journal":
             st.success("Journal entry saved locally.")
     st.subheader("Previous entries")
     for item in journals.list_recent(10):
-        with st.expander(item.entry_date.isoformat()):
+        with st.expander(format_date(item.entry_date)):
             st.markdown(f"**Completed:** {item.completed_today or '—'}")
             st.markdown(f"**In progress:** {item.in_progress or '—'}")
             st.markdown(f"**Blocked/waiting:** {item.blocked_waiting or '—'}")

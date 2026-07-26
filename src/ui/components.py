@@ -5,6 +5,8 @@ from typing import Callable
 
 import streamlit as st
 
+from src.utils.dates import format_date
+
 
 PRIORITY_META = {
     "High": ("▲", "priority-high"),
@@ -59,11 +61,7 @@ def task_card(
         ("•", "status-open"),
     )
 
-    due_text = (
-        task.due_date.isoformat()
-        if task.due_date is not None
-        else "No due date"
-    )
+    due_text = format_date(task.due_date)
 
     with st.container(border=True):
         st.markdown(f"#### {task.title}")

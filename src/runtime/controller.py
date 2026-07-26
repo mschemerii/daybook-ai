@@ -266,7 +266,8 @@ class ControllerServer:
 
     @property
     def url(self) -> str:
-        return f"http://{self.config.host}:{self.config.port}"
+        host, port = self._server.server_address[:2]
+        return f"http://{host}:{port}"
 
     def start(self) -> None:
         self._thread.start()

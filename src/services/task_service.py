@@ -4,6 +4,7 @@ from datetime import date
 
 from src.models.entities import ProposedAction, Task
 from src.repositories.task_repository import TaskRepository
+from src.utils.dates import format_date
 
 PRIORITY_WEIGHT = {"High": 0, "Medium": 1, "Low": 2}
 PROHIBITED_ACTIONS = {"send_email", "post_message", "browse_web", "run_command", "change_commitment"}
@@ -65,11 +66,11 @@ class TaskService:
     def explain_rule_selection(task: Task, today: date | None = None) -> str:
         today = today or date.today()
         if task.due_date and task.due_date < today:
-            return f"Overdue since {task.due_date.isoformat()}; {task.priority.lower()} priority."
+            return f"Overdue since {format_date(task.due_date)}; {task.priority.lower()} priority."
         if task.due_date == today:
             return f"Due today; {task.priority.lower()} priority."
         if task.due_date:
-            return f"Upcoming due date {task.due_date.isoformat()}; {task.priority.lower()} priority."
+            return f"Upcoming due date {format_date(task.due_date)}; {task.priority.lower()} priority."
         return f"No due date; {task.priority.lower()} priority."
 
     @staticmethod

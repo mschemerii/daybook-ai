@@ -155,13 +155,13 @@ The launcher performs the following steps:
 4. Selects GPU offload when supported, or CPU fallback otherwise.
 5. Starts llama.cpp unless a compatible server is already running.
 6. Discovers the model ID reported by `/v1/models`.
-7. Sends a real test request to `/v1/chat/completions` and requires the expected `DAYBOOK_READY` response before reporting AI as verified.
-8. Starts Streamlit and opens Daybook AI in the default browser automatically.
+7. Sends a real test request to `/v1/chat/completions` and requires a valid, non-empty completion before reporting AI as verified.
+8. Starts Streamlit, starts the local browser controller, and opens Daybook AI at `http://127.0.0.1:8500` automatically.
 9. Keeps task and journal features available if downloading, starting, or verifying the local model fails.
 
 The first launch may take longer because the model and runtime are downloaded. Progress and any errors are printed in the terminal; partially downloaded files use a `.part` suffix and are removed after a failed transfer.
 
-Press `Ctrl+C` once in the launcher terminal. The launcher isolates child processes from the terminal interrupt, stops Streamlit first, then gracefully terminates only the llama.cpp process that it started. An already-running external llama.cpp server is left running.
+The normal user does not need the terminal after startup. Select **Shut down** in the Daybook AI header. The browser moves to a stable local goodbye page, then the launcher stops Streamlit and gracefully terminates only the llama.cpp process that it started. An already-running external llama.cpp server is left running. `Ctrl+C` remains available as a development fallback.
 
 ### Direct Streamlit command
 
@@ -311,3 +311,47 @@ the browser to a static goodbye page, then stops Streamlit and stops
 
 The application does not require the user to inspect the terminal during
 ordinary use.
+
+## Capture implemented UI screenshots
+
+Google Chrome must already be installed. Playwright uses the installed Chrome channel; it does not install a second Chromium browser.
+
+Capture the implemented Streamlit pages in light mode:
+
+```bash
+python run.py --screenshots light
+```
+
+Capture dark mode:
+
+```bash
+python run.py --screenshots dark
+```
+
+Capture both themes:
+
+```bash
+python run.py --screenshots both
+```
+
+Screenshots are written to `docs/screenshots/light/` and `docs/screenshots/dark/`. The screenshot script is part of the project at `scripts/capture_pages.py` and should remain tracked in Git. Generated PNG files are ignored.
+
+## Final implementation checklist
+
+- [x] Today, Tasks, Daily Journal, Assistant, About, and Ethical AI pages
+- [x] Clickable task cards and editable task details
+- [x] Completed-task visibility and one-click reopening from Today
+- [x] Deterministic focus ordering with visible rule explanations
+- [x] Local SQLite persistence and sample data
+- [x] Local llama.cpp model server with real inference verification
+- [x] Recommended `unsloth/Qwen3.5-0.8B-GGUF` model
+- [x] Automatic model and llama.cpp bootstrap when missing
+- [x] Apple, NVIDIA, AMD, Intel, and CPU detection/fallback
+- [x] Explicit task/journal consent and minimized model context
+- [x] Local audit history and user-controlled memory
+- [x] Confirmation-gated AI write proposals
+- [x] Browser controller with user-facing shutdown page
+- [x] Light, dark, or both screenshot capture modes
+- [x] Offline/limited mode when the model is unavailable
+- [x] Automated tests and Python compilation validation
+
