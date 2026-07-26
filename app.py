@@ -17,7 +17,7 @@ from src.repositories.task_repository import TaskRepository
 from src.services.context_service import ContextService
 from src.services.task_service import TaskService
 from src.ui.components import page_header, task_card
-from src.utils.dates import format_date
+from src.utils.dates import format_date, format_datetime
 
 load_dotenv()
 st.set_page_config(page_title="Daybook AI", page_icon="📘", layout="wide", initial_sidebar_state="collapsed")
@@ -129,7 +129,28 @@ st.markdown(
     border-color:#D55E00;
     background:color-mix(in srgb, #D55E00 20%, var(--background-color));
 }
-.task-meta {display:flex; gap:.45rem; flex-wrap:wrap; margin:.15rem 0 .65rem 0;}
+.task-card-title {
+    margin:0 0 .35rem 0;
+    font-size:1.18rem;
+    line-height:1.35;
+}
+.task-card-description {
+    margin:0 0 .45rem 0;
+    line-height:1.55;
+}
+.task-card-source {
+    margin:0 0 .65rem 0;
+    color:var(--text-color);
+    font-size:.85rem;
+    opacity:.82;
+}
+.task-meta {
+    display:flex;
+    gap:.45rem;
+    row-gap:.4rem;
+    flex-wrap:wrap;
+    margin:.1rem 0 .7rem 0;
+}
 .task-badge {
     display:inline-flex;
     align-items:center;
@@ -140,6 +161,7 @@ st.markdown(
     font-size:.82rem;
     font-weight:650;
     line-height:1.35;
+    white-space:nowrap;
 }
 .priority-high {color:#D55E00; background:color-mix(in srgb, #D55E00 12%, var(--background-color));}
 .priority-medium {color:#0072B2; background:color-mix(in srgb, #0072B2 12%, var(--background-color));}
@@ -149,6 +171,24 @@ st.markdown(
 .status-blocked {color:#D55E00; background:color-mix(in srgb, #D55E00 12%, var(--background-color));}
 .status-completed {color:#009E73; background:color-mix(in srgb, #009E73 12%, var(--background-color));}
 .due-badge {color:var(--text-color); background:var(--secondary-background-color);}
+[class*="st-key-task_card_"] {
+    margin-bottom:.7rem;
+}
+[class*="st-key-task_card_"] [data-testid="stHorizontalBlock"] {
+    gap:.55rem;
+    flex-wrap:wrap;
+}
+[class*="st-key-task_card_"] [data-testid="stColumn"] {
+    min-width:8.5rem;
+    flex:1 1 8.5rem;
+}
+@media (max-width: 640px) {
+    .task-card-title {font-size:1.08rem;}
+    [class*="st-key-task_card_"] [data-testid="stColumn"] {
+        min-width:100%;
+        flex-basis:100%;
+    }
+}
 .rule-explanation {
     margin-top:.45rem;
     padding:.55rem .7rem;
@@ -292,7 +332,7 @@ elif page == "Tasks":
             description = st.text_area("Description", selected_task.description)
             priority = st.selectbox("Priority", ["High", "Medium", "Low"], index=["High", "Medium", "Low"].index(selected_task.priority))
             use_due = st.checkbox("Set due date", value=selected_task.due_date is not None)
-            due_date = st.date_input("Due date", value=selected_task.due_date or date.today(), disabled=not use_due)
+            due_date = st.date_input("Due date", value=selected_task.due_date or date.today(), format="MM-DD-YYYY", disabled=not use_due)
             status = st.selectbox("Status", ["Open", "In Progress", "Blocked", "Completed"], index=["Open", "In Progress", "Blocked", "Completed"].index(selected_task.status))
             source = st.text_input("Source or provenance", selected_task.source)
             notes = st.text_area("Notes", selected_task.notes)
@@ -324,7 +364,7 @@ elif page == "Tasks":
                 description = st.text_area("Description")
                 priority = st.selectbox("Priority", ["High", "Medium", "Low"], index=1)
                 use_due = st.checkbox("Set due date")
-                due_date = st.date_input("Due date", value=date.today(), disabled=not use_due)
+                due_date = st.date_input("Due date", value=date.today(), format="MM-DD-YYYY", disabled=not use_due)
                 status = st.selectbox("Status", ["Open", "In Progress", "Blocked", "Completed"])
                 source = st.text_input("Source or provenance", value="User")
                 notes = st.text_area("Notes")
@@ -346,7 +386,7 @@ elif page == "Tasks":
 
 elif page == "Daily Journal":
     page_header("Daily Journal", "Record progress, blockers, and reflection without scoring productivity.")
-    selected = st.date_input("Entry date", value=date.today())
+    selected = st.date_input("Entry date", value=date.today(), format="MM-DD-YYYY")
     entry = journals.get(selected) or JournalEntry(entry_date=selected)
     with st.form("journal"):
         completed = st.text_area("Completed today", entry.completed_today)
@@ -409,7 +449,7 @@ elif page == "Assistant":
         governance.clear_audit()
         st.rerun()
     for audit in governance.list_audit():
-        with st.expander(f"{audit['created_at']} · {audit['user_request'][:60]}"):
+        with st.expander(f"{format_datetime(audit['created_at'])} · {audit['user_request'][:60]}"):
             st.write(audit["recommendation"])
             st.json(audit["records_consulted"])
             if st.button("Delete record", key=f"a{audit['id']}"):
