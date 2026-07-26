@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import signal
 import shutil
 import subprocess
 import sys
@@ -370,160 +369,6 @@ def _stop_process(
         process.wait(timeout=3)
 
 
-
-def _listener_pids(port: int) -> list[int]:
-    """Return local process IDs listening on the requested TCP port."""
-    if os.name == "nt":
-        result = subprocess.run(
-            ["netstat", "-ano", "-p", "tcp"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        pids: set[int] = set()
-
-        for line in result.stdout.splitlines():
-            fields = line.split()
-            if len(fields) < 5:
-                continue
-
-            if (
-                fields[3].upper() == "LISTENING"
-                and fields[1].rsplit(":", 1)[-1] == str(port)
-            ):
-                try:
-                    pids.add(int(fields[-1]))
-                except ValueError:
-                    continue
-
-        return sorted(pids)
-
-    result = subprocess.run(
-        ["lsof", f"-tiTCP:{port}", "-sTCP:LISTEN"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    pids: set[int] = set()
-    for line in result.stdout.splitlines():
-        try:
-            pids.add(int(line.strip()))
-        except ValueError:
-            continue
-
-    return sorted(pids)
-
-
-def _process_looks_like_llama_server(pid: int) -> bool:
-    """Return True only when the process command identifies llama-server."""
-    if os.name == "nt":
-        result = subprocess.run(
-            [
-                "tasklist",
-                "/FI",
-                f"PID eq {pid}",
-                "/FO",
-                "CSV",
-                "/NH",
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        return "llama-server" in result.stdout.lower()
-
-    result = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "command="],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    return "llama-server" in result.stdout.lower()
-
-
-def _stop_existing_llama_server(
-    config: RuntimeConfig,
-    timeout: float = 8.0,
-) -> None:
-    """Stop a pre-existing llama-server used by Daybook AI."""
-    pids = [
-        pid
-        for pid in _listener_pids(config.model_port)
-        if _process_looks_like_llama_server(pid)
-    ]
-
-    if not pids:
-        print(
-            "No llama-server process was found to stop.",
-            flush=True,
-        )
-        return
-
-    for pid in pids:
-        print(
-            f"Stopping existing llama-server process {pid}...",
-            flush=True,
-        )
-
-        if os.name == "nt":
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-        else:
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                continue
-
-    deadline = time.time() + timeout
-
-    while time.time() < deadline:
-        if not any(
-            _process_looks_like_llama_server(pid)
-            for pid in pids
-        ):
-            return
-        time.sleep(0.25)
-
-    for pid in pids:
-        if not _process_looks_like_llama_server(pid):
-            continue
-
-        print(
-            f"llama-server process {pid} did not stop cleanly; "
-            "forcing termination.",
-            flush=True,
-        )
-
-        if os.name == "nt":
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-        else:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-
-
-def _stop_model_server(
-    config: RuntimeConfig,
-    model_process: subprocess.Popen[str] | None,
-    model_owned: bool,
-) -> None:
-    """Stop the llama-server used during this Daybook AI session."""
-    if model_owned:
-        _stop_process(model_process, "llama.cpp")
-    else:
-        _stop_existing_llama_server(config)
-
 def _capture_screenshots(
     project_root: Path,
     config: RuntimeConfig,
@@ -586,21 +431,15 @@ def run() -> int:
 
     streamlit_process = _start_streamlit(config)
     if streamlit_process is None:
-        _stop_model_server(
-            config,
-            model_process,
-            model_owned,
-        )
+        if model_owned:
+            _stop_process(model_process, "llama.cpp")
         return 1
 
     if not _wait_for_streamlit(config, streamlit_process):
         print("Streamlit did not become ready.", flush=True)
         _stop_process(streamlit_process, "Streamlit")
-        _stop_model_server(
-            config,
-            model_process,
-            model_owned,
-        )
+        if model_owned:
+            _stop_process(model_process, "llama.cpp")
         return 1
 
     if args.screenshots:
@@ -610,11 +449,8 @@ def run() -> int:
             args.screenshots,
         )
         _stop_process(streamlit_process, "Streamlit")
-        _stop_model_server(
-            config,
-            model_process,
-            model_owned,
-        )
+        if model_owned:
+            _stop_process(model_process, "llama.cpp")
         return result
 
     controller = ControllerServer(
@@ -633,11 +469,8 @@ def run() -> int:
             flush=True,
         )
         _stop_process(streamlit_process, "Streamlit")
-        _stop_model_server(
-            config,
-            model_process,
-            model_owned,
-        )
+        if model_owned:
+            _stop_process(model_process, "llama.cpp")
         return 1
 
     controller.mark_streamlit_ready()
@@ -658,11 +491,11 @@ def run() -> int:
         time.sleep(1.25)
 
         _stop_process(streamlit_process, "Streamlit")
-        _stop_model_server(
-            config,
-            model_process,
-            model_owned,
-        )
+
+        if model_owned:
+            _stop_process(model_process, "llama.cpp")
+        else:
+            print("Existing llama.cpp server was left running.", flush=True)
 
         # Leave the static goodbye page available for a few more seconds.
         time.sleep(3)
