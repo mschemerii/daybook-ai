@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from html import escape
-from typing import Callable
 
 import streamlit as st
 
@@ -40,43 +39,37 @@ def task_card(
     ``on_open`` receives the task ID when the Open task button is selected.
     ``on_reopen`` receives the task ID when the Reopen button is selected.
     """
-    priority_classes = {
-        "High": ("▲", "priority-high"),
-        "Medium": ("●", "priority-medium"),
-        "Low": ("▼", "priority-low"),
-    }
-    status_classes = {
-        "Open": ("○", "status-open"),
-        "In Progress": ("◐", "status-progress"),
-        "Blocked": ("■", "status-blocked"),
-        "Completed": ("✓", "status-completed"),
-    }
-
-    priority_icon, priority_class = priority_classes.get(
+    priority_icon, priority_class = PRIORITY_META.get(
         task.priority,
         ("•", "priority-medium"),
     )
-    status_icon, status_class = status_classes.get(
+    status_icon, status_class = STATUS_META.get(
         task.status,
         ("•", "status-open"),
     )
 
     due_text = format_date(task.due_date)
 
-    with st.container(border=True):
-        st.markdown(f"#### {task.title}")
+    with st.container(
+        border=True,
+        key=f"task_card_{key_prefix}_{task.id}",
+    ):
+        st.markdown(
+            f'<h4 class="task-card-title">{escape(str(task.title))}</h4>',
+            unsafe_allow_html=True,
+        )
 
         st.markdown(
             f"""
             <div class="task-meta">
                 <span class="task-badge {priority_class}">
-                    {priority_icon} Priority: {task.priority}
+                    {priority_icon} Priority: {escape(str(task.priority))}
                 </span>
                 <span class="task-badge {status_class}">
-                    {status_icon} Status: {task.status}
+                    {status_icon} Status: {escape(str(task.status))}
                 </span>
                 <span class="task-badge due-badge">
-                    Due: {due_text}
+                    Due: {escape(due_text)}
                 </span>
             </div>
             """,
@@ -84,17 +77,25 @@ def task_card(
         )
 
         if task.description:
-            st.write(task.description)
+            st.markdown(
+                f'<p class="task-card-description">'
+                f'{escape(str(task.description))}</p>',
+                unsafe_allow_html=True,
+            )
 
         if task.source:
-            st.caption(f"Source: {task.source}")
+            st.markdown(
+                f'<p class="task-card-source">'
+                f'Source: {escape(str(task.source))}</p>',
+                unsafe_allow_html=True,
+            )
 
         if rule_explanation:
             st.markdown(
                 f"""
                 <div class="rule-explanation">
                     <strong>Selected by application rules:</strong>
-                    {rule_explanation}
+                    {escape(str(rule_explanation))}
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -109,7 +110,7 @@ def task_card(
             actions.append("reopen")
 
         if actions:
-            columns = st.columns(len(actions))
+            columns = st.columns(len(actions), gap="small")
 
             column_index = 0
 
