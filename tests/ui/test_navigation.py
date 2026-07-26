@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import pytest
@@ -8,16 +9,18 @@ from tests.ui.helpers import navigate
 
 @pytest.mark.ui
 def test_today_page_loads(app_frame: FrameLocator):
-    app_frame.get_by_text(
-        "Today",
+    app_frame.get_by_role(
+        "heading",
+        name="Today",
         exact=True,
-    ).first.wait_for(
+    ).wait_for(
         state="visible",
         timeout=15_000,
     )
 
-    app_frame.get_by_text(
-        "Recommended focus",
+    app_frame.get_by_role(
+        "heading",
+        name="Recommended focus",
         exact=True,
     ).wait_for(
         state="visible",
@@ -43,10 +46,11 @@ def test_top_navigation(
 ):
     navigate(app_frame, page_name)
 
-    app_frame.get_by_text(
-        expected_heading,
+    app_frame.get_by_role(
+        "heading",
+        name=expected_heading,
         exact=True,
-    ).first.wait_for(
+    ).wait_for(
         state="visible",
         timeout=15_000,
     )

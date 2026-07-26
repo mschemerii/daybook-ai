@@ -44,18 +44,32 @@ def test_assistant_reaches_local_llm(
 ):
     navigate(app_frame, "Assistant")
 
-    prompt = "Reply with one short sentence confirming the local model works."
-
-    app_frame.get_by_label(
+    prompt_box = app_frame.get_by_label(
         "Ask Daybook AI",
         exact=True,
-    ).fill(prompt)
+    )
+    prompt_box.fill(
+        "Reply with one short sentence confirming the local model works."
+    )
 
-    app_frame.get_by_role(
+    # Streamlit updates the disabled state after the text area loses focus.
+    prompt_box.press("Tab")
+
+    send_button = app_frame.get_by_role(
         "button",
         name="Send to local model",
         exact=True,
-    ).click()
+    )
+
+    send_button.wait_for(
+        state="visible",
+        timeout=15_000,
+    )
+
+    app_frame.page.wait_for_timeout(750)
+
+    assert send_button.is_enabled()
+    send_button.click()
 
     app_frame.get_by_text(
         "Local AI interpretation",

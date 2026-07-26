@@ -9,6 +9,27 @@ from playwright.sync_api import FrameLocator
 from tests.ui.helpers import navigate
 
 
+def card_for_title(
+    app_frame: FrameLocator,
+    title: str,
+):
+    """Find the nearest rendered task card containing the title and action."""
+    heading = app_frame.get_by_role(
+        "heading",
+        name=title,
+        exact=True,
+    )
+
+    heading.wait_for(
+        state="visible",
+        timeout=15_000,
+    )
+
+    return heading.locator(
+        "xpath=ancestor::*[.//button[normalize-space()='Open task']][1]"
+    )
+
+
 @pytest.mark.ui
 def test_create_open_edit_complete_and_reopen_task(
     app_frame: FrameLocator,
@@ -40,19 +61,10 @@ def test_create_open_edit_complete_and_reopen_task(
         exact=True,
     ).click()
 
-    app_frame.get_by_text(
+    task_card = card_for_title(
+        app_frame,
         original_title,
-        exact=True,
-    ).wait_for(
-        state="visible",
-        timeout=15_000,
     )
-
-    task_card = app_frame.locator(
-        '[data-testid="stVerticalBlockBorderWrapper"]'
-    ).filter(
-        has_text=original_title,
-    ).first
 
     task_card.get_by_role(
         "button",
@@ -80,8 +92,9 @@ def test_create_open_edit_complete_and_reopen_task(
         exact=True,
     ).click()
 
-    app_frame.get_by_text(
-        edited_title,
+    app_frame.get_by_role(
+        "heading",
+        name=edited_title,
         exact=True,
     ).wait_for(
         state="visible",
@@ -96,11 +109,20 @@ def test_create_open_edit_complete_and_reopen_task(
 
     navigate(app_frame, "Today")
 
-    completed_card = app_frame.locator(
-        '[data-testid="stVerticalBlockBorderWrapper"]'
-    ).filter(
-        has_text=edited_title,
-    ).first
+    completed_heading = app_frame.get_by_role(
+        "heading",
+        name=edited_title,
+        exact=True,
+    )
+
+    completed_heading.wait_for(
+        state="visible",
+        timeout=15_000,
+    )
+
+    completed_card = completed_heading.locator(
+        "xpath=ancestor::*[.//button[normalize-space()='Reopen']][1]"
+    )
 
     completed_card.get_by_role(
         "button",
@@ -110,8 +132,9 @@ def test_create_open_edit_complete_and_reopen_task(
 
     navigate(app_frame, "Tasks")
 
-    app_frame.get_by_text(
-        edited_title,
+    app_frame.get_by_role(
+        "heading",
+        name=edited_title,
         exact=True,
     ).wait_for(
         state="visible",

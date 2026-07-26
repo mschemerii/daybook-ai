@@ -1,6 +1,6 @@
+
 from __future__ import annotations
 
-import re
 from playwright.sync_api import FrameLocator
 
 
@@ -17,20 +17,35 @@ def navigate(
     frame: FrameLocator,
     page_name: str,
 ) -> None:
-    """Select one item from Daybook AI's top radio navigation."""
-    radio = frame.get_by_role(
-        "radio",
-        name=page_name,
-        exact=True,
+    """Click Streamlit's visible radio label rather than its hidden input."""
+    navigation = frame.locator(
+        '.st-key-top_navigation [role="radiogroup"]'
     )
-    radio.check()
+
+    navigation.wait_for(
+        state="visible",
+        timeout=15_000,
+    )
+
+    option = navigation.locator("label").filter(
+        has_text=page_name,
+    )
+
+    if option.count() != 1:
+        raise AssertionError(
+            f"Expected one visible navigation option named "
+            f"{page_name!r}, found {option.count()}."
+        )
+
+    option.click()
     wait_for_streamlit(frame)
 
 
 def open_first_task(frame: FrameLocator) -> None:
     button = frame.get_by_role(
         "button",
-        name=re.compile(r"open task", re.IGNORECASE),
+        name="Open task",
+        exact=True,
     ).first
 
     button.wait_for(

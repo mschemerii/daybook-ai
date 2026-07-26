@@ -163,3 +163,19 @@ existing repository/service unit tests. The intended stack is:
 2. Streamlit AppTest for widget-level behavior
 3. Playwright for real browser workflows
 4. One manual visual review for layout and wording
+
+
+## Streamlit navigation implementation note
+
+Streamlit 1.56 visually renders horizontal radio choices as clickable labels
+while the underlying `<input type="radio">` elements are hidden. The
+Playwright helper therefore clicks the visible label inside
+`.st-key-top_navigation` instead of calling `.check()` on the hidden input.
+
+
+## Version 3 selector fixes
+
+- Tests visible navigation labels rather than Streamlit's changing internal radiogroup markup.
+- Tests the visible shutdown text rather than sanitized CSS classes.
+- Blurs the assistant prompt before checking that the send button is enabled.
+- Finds task cards by their heading and nearest action-button ancestor.
