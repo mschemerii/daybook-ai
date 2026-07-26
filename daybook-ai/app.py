@@ -163,13 +163,31 @@ st.markdown(
     line-height:1.35;
     white-space:nowrap;
 }
-.priority-high {color:#D55E00; background:color-mix(in srgb, #D55E00 12%, var(--background-color));}
-.priority-medium {color:#0072B2; background:color-mix(in srgb, #0072B2 12%, var(--background-color));}
-.priority-low {color:#009E73; background:color-mix(in srgb, #009E73 12%, var(--background-color));}
-.status-open {color:#0072B2; background:color-mix(in srgb, #0072B2 10%, var(--background-color));}
-.status-progress {color:#CC79A7; background:color-mix(in srgb, #CC79A7 12%, var(--background-color));}
-.status-blocked {color:#D55E00; background:color-mix(in srgb, #D55E00 12%, var(--background-color));}
-.status-completed {color:#009E73; background:color-mix(in srgb, #009E73 12%, var(--background-color));}
+.priority-high {--badge-accent:#D55E00;}
+.priority-medium {--badge-accent:#0072B2;}
+.priority-low {--badge-accent:#009E73;}
+.status-open {--badge-accent:#0072B2;}
+.status-progress {--badge-accent:#CC79A7;}
+.status-blocked {--badge-accent:#D55E00;}
+.status-completed {--badge-accent:#009E73;}
+.priority-high,
+.priority-medium,
+.priority-low,
+.status-open,
+.status-progress,
+.status-blocked,
+.status-completed {
+    color:color-mix(
+        in srgb,
+        var(--badge-accent) 60%,
+        var(--text-color)
+    );
+    background:color-mix(
+        in srgb,
+        var(--badge-accent) 12%,
+        var(--background-color)
+    );
+}
 .due-badge {color:var(--text-color); background:var(--secondary-background-color);}
 [class*="st-key-task_card_"] {
     margin-bottom:.7rem;
