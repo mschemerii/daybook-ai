@@ -52,7 +52,6 @@ def test_assistant_reaches_local_llm(
         "Reply with one short sentence confirming the local model works."
     )
 
-    # Streamlit updates the disabled state after the text area loses focus.
     prompt_box.press("Tab")
 
     send_button = app_frame.get_by_role(
@@ -66,7 +65,13 @@ def test_assistant_reaches_local_llm(
         timeout=15_000,
     )
 
-    app_frame.page.wait_for_timeout(750)
+    for _ in range(30):
+        if send_button.is_enabled():
+            break
+
+        send_button.evaluate(
+            "element => new Promise(resolve => setTimeout(resolve, 100))"
+        )
 
     assert send_button.is_enabled()
     send_button.click()

@@ -13,7 +13,6 @@ def card_for_title(
     app_frame: FrameLocator,
     title: str,
 ):
-    """Find the nearest rendered task card containing the title and action."""
     heading = app_frame.get_by_role(
         "heading",
         name=title,
@@ -40,10 +39,13 @@ def test_create_open_edit_complete_and_reopen_task(
 
     navigate(app_frame, "Tasks")
 
-    app_frame.get_by_text(
-        "Create task",
-        exact=True,
-    ).click()
+    create_expander = app_frame.locator(
+        '[data-testid="stExpander"]'
+    ).filter(
+        has_text="Create task",
+    ).first
+
+    create_expander.locator("summary").click()
 
     app_frame.get_by_label(
         "Title",
