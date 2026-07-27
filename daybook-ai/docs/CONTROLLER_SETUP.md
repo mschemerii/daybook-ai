@@ -2,9 +2,9 @@
 
 Daybook AI now uses three local services:
 
-- Controller: `http://127.0.0.1:8500`
-- Streamlit: `http://127.0.0.1:8501`
-- llama.cpp: `http://127.0.0.1:8080`
+- Controller: `http://127.0.0.1:88500`
+- Streamlit: `http://127.0.0.1:88501`
+- llama.cpp: `http://127.0.0.1:88080`
 
 Run normally:
 
@@ -17,7 +17,7 @@ Streamlit application and remains available during shutdown.
 
 When the user selects **Shut down**:
 
-1. The browser navigates away from Streamlit to `/shutdown` on port 8500.
+1. The browser navigates away from Streamlit to `/shutdown` on port 88500.
 2. The controller immediately displays a static goodbye page.
 3. The launcher stops Streamlit.
 4. The launcher stops llama.cpp only when Daybook AI started it.

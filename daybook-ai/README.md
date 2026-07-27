@@ -117,15 +117,15 @@ The defaults require no model-path editing. Copy `.env.example` to `.env`; the l
 
 ```dotenv
 DAYBOOK_DB_PATH=data/daybook.db
-DAYBOOK_MODEL_BASE_URL=http://127.0.0.1:8080/v1
+DAYBOOK_MODEL_BASE_URL=http://127.0.0.1:88080/v1
 DAYBOOK_MODEL_NAME=auto
 DAYBOOK_MODEL_PATH=models/Qwen3.5-0.8B-UD-Q4_K_XL.gguf
 DAYBOOK_LLAMA_SERVER=llama-server
 DAYBOOK_MODEL_HOST=127.0.0.1
-DAYBOOK_MODEL_PORT=8080
+DAYBOOK_MODEL_PORT=88080
 DAYBOOK_MODEL_CONTEXT_SIZE=4096
 DAYBOOK_STREAMLIT_HOST=127.0.0.1
-DAYBOOK_STREAMLIT_PORT=8501
+DAYBOOK_STREAMLIT_PORT=88501
 ```
 
 When the configured file is absent but another `.gguf` already exists in `models/`, the existing model is used and is not overwritten.
@@ -304,8 +304,8 @@ Run the application with:
 python run.py
 ```
 
-The launcher opens `http://127.0.0.1:8500`. This local controller displays the
-Streamlit interface running on port 8501. Selecting **Shut down** first moves
+The launcher opens `http://127.0.0.1:88500`. This local controller displays the
+Streamlit interface running on port 88501. Selecting **Shut down** first moves
 the browser to a static goodbye page, then stops Streamlit and stops
 `llama-server` only when Daybook AI started that process.
 

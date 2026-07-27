@@ -1,7 +1,7 @@
 """Small local controller server for Daybook AI.
 
-The controller serves a stable browser shell on port 8500. Streamlit runs
-separately on port 8501 inside an iframe. During shutdown, the browser is
+The controller serves a stable browser shell on port 88500. Streamlit runs
+separately on port 88501 inside an iframe. During shutdown, the browser is
 redirected to a static goodbye page before Streamlit is stopped, preventing
 Streamlit's built-in connection-error dialog from appearing.
 """
