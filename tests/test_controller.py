@@ -10,7 +10,7 @@ def test_controller_health_and_shutdown():
         ControllerConfig(
             host="127.0.0.1",
             port=0,
-            streamlit_url="http://127.0.0.1:88501",
+            streamlit_url="http://127.0.0.1:8501",
         )
     )
     controller.start()

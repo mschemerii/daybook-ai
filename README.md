@@ -272,7 +272,7 @@ The installed binary may not include the appropriate backend. Install a CUDA bui
 The launcher prints the local address, normally:
 
 ```text
-http://127.0.0.1:88501
+http://127.0.0.1:8501
 ```
 
 Browser opening can fail in remote shells, containers, or systems without a graphical session. The application remains available at the printed address.
@@ -304,7 +304,7 @@ Run the application with:
 python run.py
 ```
 
-The launcher opens `http://127.0.0.1:88500`. This local controller displays the
+The launcher opens `http://127.0.0.1:8500`. This local controller displays the
 Streamlit interface running on port 8501. Selecting **Shut down** first moves
 the browser to a static goodbye page, then stops Streamlit and stops
 `llama-server` only when Daybook AI started that process.

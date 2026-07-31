@@ -34,7 +34,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--url",
-        default="http://127.0.0.1:88501",
+        default="http://127.0.0.1:8501",
         help="Streamlit URL to capture.",
     )
     return parser.parse_args()

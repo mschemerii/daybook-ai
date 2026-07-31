@@ -14,8 +14,8 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CONTROLLER_URL = "http://127.0.0.1:88500"
-STREAMLIT_URL = "http://127.0.0.1:88501"
+CONTROLLER_URL = "http://127.0.0.1:8500"
+STREAMLIT_URL = "http://127.0.0.1:8501"
 
 
 def parse_arguments() -> argparse.Namespace:

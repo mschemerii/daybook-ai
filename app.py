@@ -23,9 +23,9 @@ load_dotenv()
 st.set_page_config(page_title="Daybook AI", page_icon="📘", layout="wide", initial_sidebar_state="collapsed")
 
 DB_PATH = Path(os.getenv("DAYBOOK_DB_PATH", "data/daybook.db"))
-MODEL_BASE_URL = os.getenv("DAYBOOK_MODEL_BASE_URL", "http://127.0.0.1:88080/v1")
+MODEL_BASE_URL = os.getenv("DAYBOOK_MODEL_BASE_URL", "http://127.0.0.1:8080/v1")
 MODEL_NAME = os.getenv("DAYBOOK_MODEL_NAME", "auto")
-CONTROLLER_URL = os.getenv("DAYBOOK_CONTROLLER_URL", "http://127.0.0.1:88500")
+CONTROLLER_URL = os.getenv("DAYBOOK_CONTROLLER_URL", "http://127.0.0.1:8500")
 PAGES = ["Today", "Tasks", "Daily Journal", "Assistant", "About", "Ethical AI"]
 
 @st.cache_resource
