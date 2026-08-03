@@ -150,14 +150,15 @@ The launcher performs the following steps:
 
 1. Checks the installed Streamlit version and automatically installs the compatible 1.56.0 release when Streamlit is missing or version 1.57+ is installed.
 2. Detects the operating system, CPU architecture, and available Apple, NVIDIA, AMD, or Intel GPU.
-2. Uses an existing GGUF model or downloads `Qwen3.5-0.8B-UD-Q4_K_XL.gguf` when none exists.
-3. Uses an existing `llama-server` or downloads an official compatible llama.cpp release into `tools/llama.cpp/`.
-4. Selects GPU offload when supported, or CPU fallback otherwise.
-5. Starts llama.cpp unless a compatible server is already running.
-6. Discovers the model ID reported by `/v1/models`.
-7. Sends a real test request to `/v1/chat/completions` and requires a valid, non-empty completion before reporting AI as verified.
-8. Starts Streamlit, starts the local browser controller, and opens Daybook AI at `http://127.0.0.1:8500` automatically.
-9. Keeps task and journal features available if downloading, starting, or verifying the local model fails.
+3. Uses an explicitly configured or `PATH`-available `llama-server` when it passes executable validation.
+4. Otherwise installs the pinned official llama.cpp `b10217` package selected by an explicit platform matrix.
+5. Verifies every runtime archive with its publisher-provided SHA-256 digest and records a compatibility manifest plus executable digest.
+6. Runs `llama-server --version` and `--list-devices`; GPU layers are enabled only when the intended backend is reported, with CPU fallback otherwise.
+7. Uses an existing GGUF model or downloads `Qwen3.5-0.8B-UD-Q4_K_XL.gguf` when none exists.
+8. Starts an authenticated llama.cpp server unless a compatible server is already running.
+9. Sends a real test request to `/v1/chat/completions` and requires a valid, non-empty completion before reporting AI as verified.
+10. Starts Streamlit and the authenticated local browser controller, then opens Daybook AI at `http://127.0.0.1:8500` automatically.
+11. Keeps task and journal features available if downloading, starting, or verifying the local model fails.
 
 The first launch may take longer because the model and runtime are downloaded. Progress and any errors are printed in the terminal; partially downloaded files use a `.part` suffix and are removed after a failed transfer.
 
@@ -190,35 +191,41 @@ If the inference test fails, the Assistant is shown as unavailable, while Tasks 
 Manual startup remains available for troubleshooting:
 
 ```bash
-llama-server \
+LLAMA_API_KEY="choose-a-local-secret" llama-server \
   -m models/Qwen3.5-0.8B-UD-Q4_K_XL.gguf \
   --host 127.0.0.1 \
   --port 8080 \
   -c 4096 \
-  -ngl 99
+  -ngl 99 \
+  --cors-origins localhost \
+  --no-cors-credentials \
+  --no-webui
 ```
 
 For CPU-only operation:
 
 ```bash
-llama-server \
+LLAMA_API_KEY="choose-a-local-secret" llama-server \
   -m models/Qwen3.5-0.8B-UD-Q4_K_XL.gguf \
   --host 127.0.0.1 \
   --port 8080 \
   -c 4096 \
-  -ngl 0
+  -ngl 0 \
+  --cors-origins localhost \
+  --no-cors-credentials \
+  --no-webui
 ```
 
 Verify the OpenAI-compatible endpoint:
 
 ```bash
-curl http://127.0.0.1:8080/v1/models
+curl -H "Authorization: Bearer choose-a-local-secret" http://127.0.0.1:8080/v1/models
 ```
 
 PowerShell alternative:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8080/v1/models
+Invoke-RestMethod -Headers @{Authorization="Bearer choose-a-local-secret"} http://127.0.0.1:8080/v1/models
 ```
 
 ## Run tests
@@ -243,7 +250,7 @@ pytest -q
 
 ### Automatic llama.cpp installation failed
 
-Check the terminal for the selected release and download error. Confirm that GitHub is reachable. A manual installation can be configured with:
+Check the terminal for the pinned release, selected backend, digest validation, and download error. Confirm that GitHub is reachable. A manual installation can be configured with:
 
 ```dotenv
 DAYBOOK_LLAMA_SERVER=/absolute/path/to/llama-server
@@ -265,23 +272,23 @@ DAYBOOK_MODEL_PATH=models/exact-model-filename.gguf
 
 ### GPU was detected but llama.cpp uses the CPU
 
-The installed binary may not include the appropriate backend. Install a CUDA build for NVIDIA, a Vulkan or ROCm build for AMD, a Vulkan/SYCL/OpenVINO build for Intel, or a Metal-enabled macOS build. The official llama.cpp startup log is the source of truth for the backend actually being used.
+The launcher enables GPU layers only when `llama-server --list-devices` reports the expected backend. If driver or executable validation fails, it reports the fallback and uses CPU inference. Windows NVIDIA selects CUDA; Windows AMD selects HIP; Windows Intel selects SYCL; Linux AMD selects ROCm; Linux NVIDIA and Intel select Vulkan; macOS selects the official Metal-enabled package.
 
 ### Browser does not open
 
 The launcher prints the local address, normally:
 
 ```text
-http://127.0.0.1:8501
+http://127.0.0.1:8500
 ```
 
 Browser opening can fail in remote shells, containers, or systems without a graphical session. The application remains available at the printed address.
 
 ## Limitations
 
-- Single-user local prototype; no authentication or encryption-at-rest layer.
+- Single-user local prototype; it has per-launch service tokens but no user-account system or encryption-at-rest layer.
 - Small local models may produce weak or invalid answers.
-- Hardware detection is advisory and cannot guarantee driver or binary-backend compatibility.
+- Unsupported or unavailable acceleration falls back to CPU and may be slower.
 - The current UI supports direct user task CRUD. The proposal confirmation service and schema are implemented and tested; a future UI iteration can add structured proposal extraction for additional model-driven write requests.
 - No external information is available to the assistant.
 
@@ -292,7 +299,7 @@ Daybook AI pins Streamlit to `1.56.0`. Streamlit 1.57 introduced a new Starlette
 
 ### Runtime reuse and LLM verification
 
-The launcher searches the current project recursively for `.gguf` files and `llama-server`. It also checks sibling folders whose names begin with `daybook-ai`, allowing a newly extracted project version to reuse previously downloaded model and llama.cpp files.
+The launcher honors `DAYBOOK_LLAMA_SERVER` first, then a `llama-server` available on `PATH`. Automatically installed executables are reused only when their pinned release, operating system, architecture, backend, asset list, manifest, executable digest, version command, and device inspection all validate. Executables from sibling project folders are never reused. Existing GGUF models may still be reused from a sibling Daybook AI folder to avoid another large model download.
 
 AI availability is confirmed with a real request to `/v1/chat/completions`. Verification succeeds when llama.cpp returns a valid, non-empty completion in either `content` or `reasoning_content`; it does not require the model to repeat an exact phrase. Qwen thinking is disabled where supported so normal assistant responses are returned in the visible content field.
 
@@ -304,10 +311,11 @@ Run the application with:
 python run.py
 ```
 
-The launcher opens `http://127.0.0.1:8500`. This local controller displays the
+The launcher opens `http://127.0.0.1:8500`. This loopback-only controller displays the
 Streamlit interface running on port 8501. Selecting **Shut down** first moves
 the browser to a static goodbye page, then stops Streamlit and stops
-`llama-server` only when Daybook AI started that process.
+`llama-server` only when Daybook AI started that process. The shutdown request
+requires a fresh per-launch token generated by the launcher.
 
 The application does not require the user to inspect the terminal during
 ordinary use.
@@ -346,7 +354,9 @@ Screenshots are written to `docs/screenshots/light/` and `docs/screenshots/dark/
 - [x] Local llama.cpp model server with real inference verification
 - [x] Recommended `unsloth/Qwen3.5-0.8B-GGUF` model
 - [x] Automatic model and llama.cpp bootstrap when missing
-- [x] Apple, NVIDIA, AMD, Intel, and CPU detection/fallback
+- [x] Explicit Apple Metal, Windows CUDA/HIP/SYCL, Linux ROCm/Vulkan, and CPU package selection
+- [x] Runtime SHA-256, archive, executable, manifest, and device validation
+- [x] Loopback-only services with authenticated llama.cpp and controller shutdown requests
 - [x] Explicit task/journal consent and minimized model context
 - [x] Local audit history and user-controlled memory
 - [x] Confirmation-gated AI write proposals
@@ -354,4 +364,3 @@ Screenshots are written to `docs/screenshots/light/` and `docs/screenshots/dark/
 - [x] Light, dark, or both screenshot capture modes
 - [x] Offline/limited mode when the model is unavailable
 - [x] Automated tests and Python compilation validation
-

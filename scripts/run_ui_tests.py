@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -11,7 +11,6 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONTROLLER_URL = "http://127.0.0.1:8500"
@@ -85,10 +84,10 @@ def wait_for_url(
     )
 
 
-def request_shutdown() -> None:
+def request_shutdown(token: str) -> None:
     try:
         urllib.request.urlopen(
-            f"{CONTROLLER_URL}/shutdown",
+            f"{CONTROLLER_URL}/shutdown?token={token}",
             timeout=5,
         ).read()
     except (
@@ -121,8 +120,10 @@ def main() -> int:
             )
 
         environment = os.environ.copy()
+        controller_token = secrets.token_urlsafe(32)
         environment["DAYBOOK_DB_PATH"] = str(test_database)
         environment["DAYBOOK_TEST_URL"] = CONTROLLER_URL
+        environment["DAYBOOK_CONTROLLER_TOKEN"] = controller_token
 
         print("Starting isolated Daybook AI test instance...")
 
@@ -203,7 +204,7 @@ def main() -> int:
 
         finally:
             if not args.keep_running:
-                request_shutdown()
+                request_shutdown(controller_token)
 
                 try:
                     application.wait(timeout=20)
