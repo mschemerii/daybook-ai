@@ -6,7 +6,6 @@ from typing import Any
 
 import requests
 
-
 SYSTEM_PROMPT = """You are Daybook AI, a bounded local assistant.
 Use only the records explicitly supplied. Distinguish stored facts from interpretation.
 Do not claim current external knowledge. Do not shame the user. Do not imply actions were taken.
@@ -25,6 +24,13 @@ class LocalModelClient:
     base_url: str
     model: str = "auto"
     timeout: int = 30
+    api_key: str = ""
+
+    @property
+    def request_headers(self) -> dict[str, str]:
+        if not self.api_key:
+            return {}
+        return {"Authorization": f"Bearer {self.api_key}"}
 
     @property
     def models_url(self) -> str:
@@ -36,7 +42,11 @@ class LocalModelClient:
 
     def available_models(self) -> list[str]:
         try:
-            response = requests.get(self.models_url, timeout=3)
+            response = requests.get(
+                self.models_url,
+                headers=self.request_headers,
+                timeout=3,
+            )
             response.raise_for_status()
             payload = response.json()
             values = payload.get("data", [])
@@ -73,7 +83,12 @@ class LocalModelClient:
                 "max_tokens": 32,
                 "chat_template_kwargs": {"enable_thinking": False},
             }
-            response = requests.post(self.chat_url, json=payload, timeout=min(self.timeout, 15))
+            response = requests.post(
+                self.chat_url,
+                json=payload,
+                headers=self.request_headers,
+                timeout=min(self.timeout, 15),
+            )
             response.raise_for_status()
             data = response.json()
             choice = data["choices"][0]
@@ -105,7 +120,12 @@ class LocalModelClient:
             "chat_template_kwargs": {"enable_thinking": False},
         }
         try:
-            response = requests.post(self.chat_url, json=payload, timeout=self.timeout)
+            response = requests.post(
+                self.chat_url,
+                json=payload,
+                headers=self.request_headers,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
             data = response.json()
             message = data["choices"][0]["message"]

@@ -1,7 +1,9 @@
 from datetime import date
+
 import pytest
+
 from src.agent.local_llm import LocalModelClient, LocalModelError
-from src.models.entities import Task, JournalEntry
+from src.models.entities import JournalEntry, Task
 from src.services.context_service import ContextService
 
 
@@ -45,8 +47,8 @@ def test_healthcheck_verifies_real_inference_and_discovers_model(monkeypatch):
         "requests.get",
         lambda *args, **kwargs: Response({"data": [{"id": "qwen-local"}]}),
     )
-    def fake_post(url, json, timeout):
-        posts.append((url, json, timeout))
+    def fake_post(url, json, headers, timeout):
+        posts.append((url, json, headers, timeout))
         return Response({"choices": [{"message": {"content": "Ready."}}]})
     monkeypatch.setattr("requests.post", fake_post)
 
@@ -94,7 +96,7 @@ def test_chat_uses_discovered_model_and_local_endpoint(monkeypatch):
         "requests.get",
         lambda *args, **kwargs: Response({"data": [{"id": "loaded-qwen"}]}),
     )
-    def fake_post(url, json, timeout):
+    def fake_post(url, json, headers, timeout):
         captured.update({"url": url, "payload": json})
         return Response({"choices": [{"message": {"content": "Focus on the due task."}}]})
     monkeypatch.setattr("requests.post", fake_post)
@@ -107,3 +109,29 @@ def test_chat_uses_discovered_model_and_local_endpoint(monkeypatch):
     assert captured["url"] == "http://127.0.0.1:8080/v1/chat/completions"
     assert captured["payload"]["model"] == "loaded-qwen"
     assert "Review plan" in captured["payload"]["messages"][1]["content"]
+
+
+def test_local_model_client_sends_bearer_token(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "loaded-qwen"}]}
+
+    captured = {}
+
+    def fake_get(url, headers, timeout):
+        captured["headers"] = headers
+        return Response()
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    models = LocalModelClient(
+        "http://127.0.0.1:8080/v1",
+        "auto",
+        api_key="secret-token",
+    ).available_models()
+
+    assert models == ["loaded-qwen"]
+    assert captured["headers"] == {"Authorization": "Bearer secret-token"}

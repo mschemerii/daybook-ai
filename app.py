@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
-import time
 from datetime import date
+from html import escape
 from pathlib import Path
+from urllib.parse import urlencode
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -25,7 +26,9 @@ st.set_page_config(page_title="Daybook AI", page_icon="📘", layout="wide", ini
 DB_PATH = Path(os.getenv("DAYBOOK_DB_PATH", "data/daybook.db"))
 MODEL_BASE_URL = os.getenv("DAYBOOK_MODEL_BASE_URL", "http://127.0.0.1:8080/v1")
 MODEL_NAME = os.getenv("DAYBOOK_MODEL_NAME", "auto")
+MODEL_API_KEY = os.getenv("DAYBOOK_MODEL_API_KEY", "")
 CONTROLLER_URL = os.getenv("DAYBOOK_CONTROLLER_URL", "http://127.0.0.1:8500")
+CONTROLLER_TOKEN = os.getenv("DAYBOOK_CONTROLLER_TOKEN", "")
 PAGES = ["Today", "Tasks", "Daily Journal", "Assistant", "About", "Ethical AI"]
 
 @st.cache_resource
@@ -34,7 +37,14 @@ def services():
     tasks = TaskRepository(db)
     journals = JournalRepository(db)
     governance = GovernanceRepository(db)
-    return tasks, journals, governance, TaskService(tasks), ContextService(tasks, journals), LocalModelClient(MODEL_BASE_URL, MODEL_NAME)
+    return (
+        tasks,
+        journals,
+        governance,
+        TaskService(tasks),
+        ContextService(tasks, journals),
+        LocalModelClient(MODEL_BASE_URL, MODEL_NAME, api_key=MODEL_API_KEY),
+    )
 
 
 tasks, journals, governance, task_service, context_service, llm = services()
@@ -245,7 +255,11 @@ with st.container(key="top_navigation"):
         )
 
     with shutdown_column:
-        shutdown_url = f"{CONTROLLER_URL.rstrip('/')}/shutdown"
+        shutdown_query = urlencode({"token": CONTROLLER_TOKEN})
+        shutdown_url = escape(
+            f"{CONTROLLER_URL.rstrip('/')}/shutdown?{shutdown_query}",
+            quote=True,
+        )
 
         st.markdown(
             f"""

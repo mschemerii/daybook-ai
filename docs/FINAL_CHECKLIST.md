@@ -11,8 +11,10 @@ This checklist describes the implemented proof of concept.
 - Local audit history and user-controlled memory.
 - Confirmation-required proposed actions; the model cannot write directly to SQLite.
 - No surveillance, productivity score, external communication, command execution, or internet tools.
-- Hardware detection and CPU fallback.
-- Automatic llama.cpp and model bootstrap when missing.
-- Browser controller for startup and clean user-facing shutdown.
+- Explicit OS, architecture, and backend package selection with verified CPU fallback.
+- Pinned llama.cpp `b10217` bootstrap with SHA-256, archive, executable, device, and cache-manifest validation.
+- Explicit configuration and system `PATH` take precedence over automatic runtime downloads.
+- Loopback-only managed services, authenticated llama.cpp requests, restricted CORS, and disabled llama.cpp Web UI.
+- Browser controller with token-protected shutdown that stops only Daybook-owned processes.
 - Screenshot capture for light, dark, or both themes.
 - Limited mode when local inference is unavailable.

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
-import signal
+import secrets
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,6 @@ from dotenv import load_dotenv
 from src.runtime.bootstrap import bootstrap_runtime
 from src.runtime.controller import ControllerConfig, ControllerServer
 from src.runtime.hardware import HardwareInfo, detect_hardware
-
 
 STREAMLIT_COMPAT_SPEC = "streamlit==1.56.0"
 STREAMLIT_ASGI_CUTOFF = (1, 57, 0)
@@ -38,6 +38,8 @@ class RuntimeConfig:
     controller_port: int
     context_size: int
     gpu_layers: int
+    model_api_key: str
+    controller_token: str
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -96,9 +98,15 @@ def _ensure_compatible_streamlit(project_root: Path) -> bool:
     return result.returncode == 0
 
 
-def _is_http_ready(url: str, timeout: float = 0.75) -> bool:
+def _is_http_ready(
+    url: str,
+    timeout: float = 0.75,
+    api_key: str | None = None,
+) -> bool:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return 200 <= response.status < 500
     except (urllib.error.URLError, TimeoutError, OSError):
         return False
@@ -133,10 +141,27 @@ def _find_llama_server(project_root: Path) -> str | None:
     if resolved:
         return resolved
 
-    for candidate in (project_root / "tools" / "llama.cpp").rglob("*"):
-        if candidate.is_file() and candidate.name in {"llama-server", "llama-server.exe"}:
-            return str(candidate.resolve())
     return None
+
+
+def _require_loopback_host(name: str, value: str) -> str:
+    normalized = value.strip()
+    if normalized.lower() == "localhost":
+        return normalized
+    try:
+        if ipaddress.ip_address(normalized).is_loopback:
+            return normalized
+    except ValueError:
+        pass
+    raise ValueError(
+        f"{name} must use a loopback address; received {value!r}. "
+        "Daybook AI v0.8 does not expose managed services to the network."
+    )
+
+
+def _http_origin(host: str, port: int) -> str:
+    url_host = f"[{host}]" if ":" in host else host
+    return f"http://{url_host}:{port}"
 
 
 def load_runtime_config(
@@ -145,28 +170,44 @@ def load_runtime_config(
 ) -> RuntimeConfig:
     load_dotenv(project_root / ".env")
     default_layers = 99 if hardware.gpu_available else 0
+    model_host = _require_loopback_host(
+        "DAYBOOK_MODEL_HOST",
+        os.getenv("DAYBOOK_MODEL_HOST", "127.0.0.1"),
+    )
+    streamlit_host = _require_loopback_host(
+        "DAYBOOK_STREAMLIT_HOST",
+        os.getenv("DAYBOOK_STREAMLIT_HOST", "127.0.0.1"),
+    )
+    controller_host = _require_loopback_host(
+        "DAYBOOK_CONTROLLER_HOST",
+        os.getenv("DAYBOOK_CONTROLLER_HOST", "127.0.0.1"),
+    )
 
     return RuntimeConfig(
         project_root=project_root,
         model_path=_find_model(project_root),
         llama_server=_find_llama_server(project_root),
-        model_host=os.getenv("DAYBOOK_MODEL_HOST", "127.0.0.1"),
+        model_host=model_host,
         model_port=int(os.getenv("DAYBOOK_MODEL_PORT", "8080")),
-        streamlit_host=os.getenv("DAYBOOK_STREAMLIT_HOST", "127.0.0.1"),
+        streamlit_host=streamlit_host,
         streamlit_port=int(os.getenv("DAYBOOK_STREAMLIT_PORT", "8501")),
-        controller_host=os.getenv("DAYBOOK_CONTROLLER_HOST", "127.0.0.1"),
+        controller_host=controller_host,
         controller_port=int(os.getenv("DAYBOOK_CONTROLLER_PORT", "8500")),
         context_size=int(os.getenv("DAYBOOK_MODEL_CONTEXT_SIZE", "4096")),
         gpu_layers=int(os.getenv("DAYBOOK_GPU_LAYERS", str(default_layers))),
+        model_api_key=os.getenv("DAYBOOK_MODEL_API_KEY", "").strip()
+        or secrets.token_urlsafe(32),
+        controller_token=os.getenv("DAYBOOK_CONTROLLER_TOKEN", "").strip()
+        or secrets.token_urlsafe(32),
     )
 
 
 def _start_model(
     config: RuntimeConfig,
 ) -> tuple[subprocess.Popen[str] | None, bool]:
-    health_url = f"http://{config.model_host}:{config.model_port}/v1/models"
+    health_url = f"{_http_origin(config.model_host, config.model_port)}/v1/models"
 
-    if _is_http_ready(health_url):
+    if _is_http_ready(health_url, api_key=config.model_api_key):
         print("Using the already-running local AI server.", flush=True)
         return None, False
 
@@ -190,13 +231,20 @@ def _start_model(
         str(config.context_size),
         "-ngl",
         str(config.gpu_layers),
+        "--cors-origins",
+        "localhost",
+        "--no-cors-credentials",
+        "--no-webui",
     ]
 
     print(f"Starting local model: {config.model_path.name}", flush=True)
 
+    environment = os.environ.copy()
+    environment["LLAMA_API_KEY"] = config.model_api_key
     process = subprocess.Popen(
         command,
         cwd=config.project_root,
+        env=environment,
         text=True,
         start_new_session=True,
     )
@@ -205,7 +253,7 @@ def _start_model(
         if process.poll() is not None:
             print("llama-server exited during startup.", flush=True)
             return process, True
-        if _is_http_ready(health_url):
+        if _is_http_ready(health_url, api_key=config.model_api_key):
             print("Local AI server is ready.", flush=True)
             return process, True
         time.sleep(0.5)
@@ -216,11 +264,14 @@ def _start_model(
 
 def _verify_llm(config: RuntimeConfig) -> bool:
     """Verify that llama.cpp can return a non-empty chat completion."""
-    base_url = f"http://{config.model_host}:{config.model_port}/v1"
+    base_url = f"{_http_origin(config.model_host, config.model_port)}/v1"
 
     try:
         with urllib.request.urlopen(
-            f"{base_url}/models",
+            urllib.request.Request(
+                f"{base_url}/models",
+                headers={"Authorization": f"Bearer {config.model_api_key}"},
+            ),
             timeout=5,
         ) as response:
             models_payload = response.read().decode("utf-8")
@@ -253,7 +304,10 @@ def _verify_llm(config: RuntimeConfig) -> bool:
         request = urllib.request.Request(
             f"{base_url}/chat/completions",
             data=request_body,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {config.model_api_key}",
+            },
             method="POST",
         )
 
@@ -338,7 +392,7 @@ def _wait_for_streamlit(
     process: subprocess.Popen[str],
     timeout_seconds: int = 30,
 ) -> bool:
-    url = f"http://{config.streamlit_host}:{config.streamlit_port}"
+    url = _http_origin(config.streamlit_host, config.streamlit_port)
     deadline = time.time() + timeout_seconds
 
     while time.time() < deadline:
@@ -369,160 +423,16 @@ def _stop_process(
         process.kill()
         process.wait(timeout=3)
 
-
-
-def _listener_pids(port: int) -> list[int]:
-    """Return local process IDs listening on the requested TCP port."""
-    if os.name == "nt":
-        result = subprocess.run(
-            ["netstat", "-ano", "-p", "tcp"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        pids: set[int] = set()
-
-        for line in result.stdout.splitlines():
-            fields = line.split()
-            if len(fields) < 5:
-                continue
-
-            if (
-                fields[3].upper() == "LISTENING"
-                and fields[1].rsplit(":", 1)[-1] == str(port)
-            ):
-                try:
-                    pids.add(int(fields[-1]))
-                except ValueError:
-                    continue
-
-        return sorted(pids)
-
-    result = subprocess.run(
-        ["lsof", f"-tiTCP:{port}", "-sTCP:LISTEN"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    pids: set[int] = set()
-    for line in result.stdout.splitlines():
-        try:
-            pids.add(int(line.strip()))
-        except ValueError:
-            continue
-
-    return sorted(pids)
-
-
-def _process_looks_like_llama_server(pid: int) -> bool:
-    """Return True only when the process command identifies llama-server."""
-    if os.name == "nt":
-        result = subprocess.run(
-            [
-                "tasklist",
-                "/FI",
-                f"PID eq {pid}",
-                "/FO",
-                "CSV",
-                "/NH",
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        return "llama-server" in result.stdout.lower()
-
-    result = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "command="],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    return "llama-server" in result.stdout.lower()
-
-
-def _stop_existing_llama_server(
-    config: RuntimeConfig,
-    timeout: float = 8.0,
-) -> None:
-    """Stop a pre-existing llama-server used by Daybook AI."""
-    pids = [
-        pid
-        for pid in _listener_pids(config.model_port)
-        if _process_looks_like_llama_server(pid)
-    ]
-
-    if not pids:
-        print(
-            "No llama-server process was found to stop.",
-            flush=True,
-        )
-        return
-
-    for pid in pids:
-        print(
-            f"Stopping existing llama-server process {pid}...",
-            flush=True,
-        )
-
-        if os.name == "nt":
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-        else:
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                continue
-
-    deadline = time.time() + timeout
-
-    while time.time() < deadline:
-        if not any(
-            _process_looks_like_llama_server(pid)
-            for pid in pids
-        ):
-            return
-        time.sleep(0.25)
-
-    for pid in pids:
-        if not _process_looks_like_llama_server(pid):
-            continue
-
-        print(
-            f"llama-server process {pid} did not stop cleanly; "
-            "forcing termination.",
-            flush=True,
-        )
-
-        if os.name == "nt":
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-        else:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-
-
 def _stop_model_server(
     config: RuntimeConfig,
     model_process: subprocess.Popen[str] | None,
     model_owned: bool,
 ) -> None:
-    """Stop the llama-server used during this Daybook AI session."""
+    """Stop llama-server only when this launcher created the process."""
     if model_owned:
         _stop_process(model_process, "llama.cpp")
     else:
-        _stop_existing_llama_server(config)
+        print("Leaving the externally managed local AI server running.", flush=True)
 
 def _capture_screenshots(
     project_root: Path,
@@ -552,6 +462,9 @@ def _capture_screenshots(
 def run() -> int:
     args = parse_arguments()
     project_root = Path(__file__).resolve().parents[2]
+    # Explicit .env and process-environment settings must be available before
+    # bootstrap decides whether any runtime downloads are necessary.
+    load_dotenv(project_root / ".env")
     hardware = detect_hardware()
 
     print("Daybook AI startup", flush=True)
@@ -560,26 +473,33 @@ def run() -> int:
     bootstrap = bootstrap_runtime(project_root, hardware)
     if bootstrap.llama_server:
         os.environ["DAYBOOK_LLAMA_SERVER"] = str(bootstrap.llama_server)
+    else:
+        # Never allow load_runtime_config() to rediscover an explicit runtime
+        # that bootstrap already rejected.
+        os.environ.pop("DAYBOOK_LLAMA_SERVER", None)
     if bootstrap.model_path:
         os.environ["DAYBOOK_MODEL_PATH"] = str(bootstrap.model_path)
+    os.environ.setdefault("DAYBOOK_GPU_LAYERS", str(bootstrap.gpu_layers))
 
     config = load_runtime_config(project_root, hardware)
 
-    model_base_url = f"http://{config.model_host}:{config.model_port}/v1"
-    controller_url = f"http://{config.controller_host}:{config.controller_port}"
-    streamlit_url = f"http://{config.streamlit_host}:{config.streamlit_port}"
+    model_base_url = f"{_http_origin(config.model_host, config.model_port)}/v1"
+    controller_url = _http_origin(config.controller_host, config.controller_port)
+    streamlit_url = _http_origin(config.streamlit_host, config.streamlit_port)
 
     os.environ["DAYBOOK_MODEL_BASE_URL"] = model_base_url
+    os.environ["DAYBOOK_MODEL_API_KEY"] = config.model_api_key
     os.environ["DAYBOOK_DETECTED_GPU"] = hardware.gpu_name or "CPU only"
-    os.environ["DAYBOOK_DETECTED_BACKEND"] = hardware.recommended_backend
+    os.environ["DAYBOOK_DETECTED_BACKEND"] = bootstrap.backend
     os.environ["DAYBOOK_CONTROLLER_URL"] = controller_url
+    os.environ["DAYBOOK_CONTROLLER_TOKEN"] = config.controller_token
 
     print(
         f"Detected: {hardware.operating_system} {hardware.architecture}",
         flush=True,
     )
     print(f"Compute: {hardware.gpu_name or 'CPU only'}", flush=True)
-    print(f"Backend: {hardware.recommended_backend}", flush=True)
+    print(f"Backend: {bootstrap.backend}", flush=True)
 
     model_process, model_owned = _start_model(config)
     _verify_llm(config)
@@ -617,15 +537,15 @@ def run() -> int:
         )
         return result
 
-    controller = ControllerServer(
-        ControllerConfig(
-            host=config.controller_host,
-            port=config.controller_port,
-            streamlit_url=streamlit_url,
-        )
-    )
-
     try:
+        controller = ControllerServer(
+            ControllerConfig(
+                host=config.controller_host,
+                port=config.controller_port,
+                streamlit_url=streamlit_url,
+                shutdown_token=config.controller_token,
+            )
+        )
         controller.start()
     except OSError as exc:
         print(

@@ -9,11 +9,12 @@ Streamlit's built-in connection-error dialog from appearing.
 from __future__ import annotations
 
 import html
+import secrets
 import threading
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class ControllerConfig:
     host: str
     port: int
     streamlit_url: str
+    shutdown_token: str
     application_name: str = "Daybook AI"
 
 
@@ -203,7 +205,8 @@ def create_handler(
             self.wfile.write(content)
 
         def do_GET(self) -> None:
-            path = urlparse(self.path).path
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
 
             if path == "/health":
                 payload = b"ok"
@@ -216,6 +219,16 @@ def create_handler(
                 return
 
             if path == "/shutdown":
+                supplied_token = parse_qs(parsed_url.query).get("token", [""])[0]
+                if not secrets.compare_digest(supplied_token, config.shutdown_token):
+                    self._send_html(
+                        _page_template(
+                            "Forbidden",
+                            '<div class="center"><main class="panel"><h1>Shutdown request denied</h1></main></div>',
+                        ),
+                        HTTPStatus.FORBIDDEN,
+                    )
+                    return
                 state.shutdown_requested.set()
                 self._send_html(_goodbye_page(config.application_name))
                 return
@@ -267,7 +280,8 @@ class ControllerServer:
     @property
     def url(self) -> str:
         host, port = self._server.server_address[:2]
-        return f"http://{host}:{port}"
+        url_host = f"[{host}]" if ":" in host else host
+        return f"http://{url_host}:{port}"
 
     def start(self) -> None:
         self._thread.start()
