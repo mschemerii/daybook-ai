@@ -51,3 +51,36 @@ class PlanningRepository:
         if row is None:
             raise KeyError(f"Proposal {proposal_id} not found")
         return self._from_row(row)
+
+    def find_draft_by_fingerprint(
+        self,
+        parent_task_id: int,
+        fingerprint: str,
+    ) -> DecompositionProposal | None:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM decomposition_proposals
+                WHERE parent_task_id = ? AND fingerprint = ? AND status = 'draft'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (parent_task_id, fingerprint),
+            ).fetchone()
+        return self._from_row(row) if row is not None else None
+
+    def set_status(self, proposal_id: str, status: str) -> DecompositionProposal:
+        if status not in {"draft", "approved", "rejected", "cancelled"}:
+            raise ValueError("Unsupported proposal status")
+        with self.db.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE decomposition_proposals
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE proposal_id = ?
+                """,
+                (status, proposal_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"Proposal {proposal_id} not found")
+        return self.get(proposal_id)

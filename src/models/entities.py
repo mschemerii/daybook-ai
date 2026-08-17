@@ -72,6 +72,113 @@ class DecompositionProposal:
     updated_at: datetime | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class RankingFacts:
+    """Application-owned facts supporting one deterministic focus result."""
+
+    task_id: int
+    calculated_focus_position: int
+    user_priority: str
+    status: str
+    due_date: date | None
+    is_overdue: bool
+    due_proximity: str
+    days_until_due: int | None
+    estimated_hours: float | None
+    incomplete_blockers: tuple[str, ...]
+    deterministic_explanation: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "calculated_focus_position": self.calculated_focus_position,
+            "user_priority": self.user_priority,
+            "status": self.status,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "is_overdue": self.is_overdue,
+            "due_proximity": self.due_proximity,
+            "days_until_due": self.days_until_due,
+            "estimated_hours": self.estimated_hours,
+            "incomplete_blockers": list(self.incomplete_blockers),
+            "deterministic_explanation": self.deterministic_explanation,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DecompositionClassification:
+    category: str
+    reason: str
+    prominent_recommendation: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ReadinessAssessment:
+    ready: bool
+    missing_fields: tuple[str, ...]
+    questions: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ProposedSubtask:
+    item_key: str
+    title: str
+    description: str
+    estimated_hours: float
+    priority: str
+    suggested_sequence: int
+    completion_criterion: str
+    due_date: date | None
+    prerequisite_item_keys: tuple[str, ...]
+    provenance: str = "ai_generated"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "item_key": self.item_key,
+            "title": self.title,
+            "description": self.description,
+            "estimated_hours": self.estimated_hours,
+            "priority": self.priority,
+            "suggested_sequence": self.suggested_sequence,
+            "completion_criterion": self.completion_criterion,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "prerequisite_item_keys": list(self.prerequisite_item_keys),
+            "provenance": self.provenance,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalAdvisory:
+    kind: str
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"kind": self.kind, "message": self.message}
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedDecompositionProposal:
+    proposal_type: str
+    parent_task_id: int
+    proposal_id: str
+    summary: str
+    requires_confirmation: bool
+    subtasks: tuple[ProposedSubtask, ...]
+    advisories: tuple[ProposalAdvisory, ...]
+    warnings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "proposal_type": self.proposal_type,
+            "parent_task_id": self.parent_task_id,
+            "proposal_id": self.proposal_id,
+            "summary": self.summary,
+            "requires_confirmation": self.requires_confirmation,
+            "subtasks": [item.to_dict() for item in self.subtasks],
+            "advisories": [item.to_dict() for item in self.advisories],
+            "warnings": list(self.warnings),
+        }
+
+
 @dataclass(slots=True)
 class JournalEntry:
     entry_date: date
