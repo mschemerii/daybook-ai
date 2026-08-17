@@ -278,6 +278,20 @@ def test_valid_proposal_parsing_and_application_owned_provenance(task_repo):
     assert proposal.subtasks[1].prerequisite_item_keys == ("research",)
 
 
+def test_missing_advisories_are_safely_normalized_to_an_empty_list(task_repo):
+    parent = ready_task(task_repo)
+    payload = valid_payload(parent.id, "expected")
+    del payload["advisories"]
+
+    proposal = PlanningService.validate_decomposition_response(
+        json.dumps(payload),
+        parent_task=parent,
+        expected_proposal_id="expected",
+    )
+
+    assert proposal.advisories == ()
+
+
 @pytest.mark.parametrize(
     "mutation,match",
     [
