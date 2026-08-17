@@ -902,6 +902,8 @@ class PlanningService:
             value = json.loads(raw)
         except (json.JSONDecodeError, TypeError) as exc:
             raise Phase6ValidationError("The model response was not valid JSON.") from exc
+        if isinstance(value, dict) and "advisories" not in value:
+            value = {**value, "advisories": []}
         cls._require_exact_fields(value, TOP_LEVEL_FIELDS, "proposal")
         if value["proposal_type"] != PROPOSAL_TYPE:
             raise Phase6ValidationError("The proposal type is invalid.")
