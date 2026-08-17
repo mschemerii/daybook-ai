@@ -174,5 +174,6 @@ def test_task_estimate_is_directly_optional_and_origin_is_application_controlled
     assert 'placeholder="Optional"' in app_source
     assert '"estimated_hours": estimated_hours' in app_source
     assert 'source="User"' in app_source
-    assert '"Task origin"' in app_source
-    assert "recorded automatically" in app_source
+    assert '"task_flash_message"' in app_source
+    assert 'open_task(created_task.id)' in app_source
+    assert '"Task origin"' not in app_source
