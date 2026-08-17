@@ -55,6 +55,21 @@ CONTROLLER_URL = os.getenv("DAYBOOK_CONTROLLER_URL", "http://127.0.0.1:8500")
 CONTROLLER_TOKEN = os.getenv("DAYBOOK_CONTROLLER_TOKEN", "")
 PAGES = ["Today", "Tasks", "Daily Journal", "Assistant", "About", "Ethical AI"]
 
+PROVENANCE_LABELS = {
+    "user_created": "Created manually",
+    "ai_generated": "AI-proposed and user-approved",
+    "ai_generated_user_edited": "AI-proposed, user-edited, and user-approved",
+    "user_added_during_review": "Added manually during AI proposal review",
+}
+
+
+def task_origin_label(task) -> str:
+    """Return a user-facing, application-controlled task origin label."""
+    if task.source == "Sample data":
+        return "Included sample data"
+    return PROVENANCE_LABELS.get(task.provenance, "Recorded by Daybook AI")
+
+
 @st.cache_resource
 def services():
     db = Database(DB_PATH)
@@ -1003,17 +1018,18 @@ elif page == "Tasks":
                 format="MM-DD-YYYY",
                 disabled=not use_due,
             )
-            use_estimate = st.checkbox(
-                "Set estimated duration",
-                value=selected_task.estimated_hours is not None,
-            )
             estimated_hours = st.number_input(
                 "Estimated hours",
                 min_value=0.25,
                 max_value=estimate_limit,
-                value=float(selected_task.estimated_hours or 0.25),
+                value=(
+                    float(selected_task.estimated_hours)
+                    if selected_task.estimated_hours is not None
+                    else None
+                ),
                 step=0.25,
-                disabled=not use_estimate,
+                placeholder="Optional",
+                help="Leave blank when the task has not been estimated.",
             )
             status = st.selectbox(
                 "Status",
@@ -1021,7 +1037,12 @@ elif page == "Tasks":
                 index=status_options.index(selected_task.status),
                 disabled=selected_task.status == "Completed",
             )
-            source = st.text_input("Source or provenance", selected_task.source)
+            st.text_input(
+                "Task origin",
+                value=task_origin_label(selected_task),
+                disabled=True,
+                help="Recorded automatically; task origin cannot be edited manually.",
+            )
             notes = st.text_area("Notes", selected_task.notes)
             completion_criterion = st.text_area(
                 "Definition of done",
@@ -1034,8 +1055,8 @@ elif page == "Tasks":
                     task_service.update_task(selected_task.id, {
                         "title": title.strip(), "description": description, "priority": priority,
                         "due_date": due_date if use_due else None, "status": status,
-                        "source": source or "User", "notes": notes,
-                        "estimated_hours": estimated_hours if use_estimate else None,
+                        "notes": notes,
+                        "estimated_hours": estimated_hours,
                         "completion_criterion": completion_criterion,
                     })
                     st.success("Task updated.")
@@ -1509,17 +1530,17 @@ elif page == "Tasks":
                 priority = st.selectbox("Priority", ["High", "Medium", "Low"], index=1)
                 use_due = st.checkbox("Set due date")
                 due_date = st.date_input("Due date", value=date.today(), format="MM-DD-YYYY", disabled=not use_due)
-                use_estimate = st.checkbox("Set estimated duration")
                 estimated_hours = st.number_input(
                     "Estimated hours",
                     min_value=0.25,
                     max_value=float(STANDARD_ESTIMATE_MAX_HOURS),
-                    value=0.25,
+                    value=None,
                     step=0.25,
-                    disabled=not use_estimate,
+                    placeholder="Optional",
+                    help="Leave blank when the task has not been estimated.",
                 )
                 status = st.selectbox("Status", ["Open", "In Progress", "Blocked", "Completed"])
-                source = st.text_input("Source or provenance", value="User")
+                st.caption("Task origin: Created manually (recorded automatically).")
                 notes = st.text_area("Notes")
                 completion_criterion = st.text_area(
                     "Definition of done",
@@ -1528,8 +1549,8 @@ elif page == "Tasks":
                 if st.form_submit_button("Create task"):
                     try:
                         task_service.create_task(title=title.strip(), description=description, priority=priority,
-                            due_date=due_date if use_due else None, status=status, source=source or "User", notes=notes,
-                            estimated_hours=estimated_hours if use_estimate else None,
+                            due_date=due_date if use_due else None, status=status, source="User", notes=notes,
+                            estimated_hours=estimated_hours,
                             completion_criterion=completion_criterion)
                         st.success("Task created.")
                         st.rerun()
