@@ -63,16 +63,10 @@ def test_create_open_edit_complete_and_reopen_task(
         exact=True,
     ).click()
 
-    task_card = card_for_title(
-        app_frame,
-        original_title,
-    )
-
-    task_card.get_by_role(
-        "button",
-        name="Open task",
+    app_frame.get_by_text(
+        "Task created successfully.",
         exact=True,
-    ).click()
+    ).wait_for(state="visible", timeout=15_000)
 
     app_frame.get_by_text(
         "Task details",
