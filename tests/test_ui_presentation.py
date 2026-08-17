@@ -149,3 +149,16 @@ def test_task_card_css_includes_narrow_window_rules() -> None:
     assert '[class*="st-key-task_card_"]' in app_source
     assert "@media (max-width: 640px)" in app_source
     assert "flex-basis:100%" in app_source
+
+
+def test_phase6_ui_is_deliberate_read_only_and_has_safe_fallbacks() -> None:
+    app_source = APP_FILE.read_text(encoding="utf-8")
+
+    assert '"Explain with AI"' in app_source
+    assert '"Request Breakdown"' in app_source
+    assert '"Generate read-only proposal"' in app_source
+    assert "Validated proposal — read-only preview" in app_source
+    assert '"Cancel breakdown"' in app_source
+    assert "Untrusted local AI explanation" in app_source
+    assert "Deterministic fallback" in app_source
+    assert '"Approve proposal"' not in app_source

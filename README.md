@@ -7,10 +7,12 @@ Designed and coded by **Michael Schemer** as an Ethical AI course prototype.
 ## Features
 
 - Today view with open tasks, due-today tasks, blockers, and three rule-selected focus items.
+- Typed deterministic focus facts with deliberate, grounded local-AI explanations and deterministic fallback.
 - Full local task CRUD with provenance.
 - Epic/subtask hierarchy and deterministic task dependencies with lifecycle guards.
 - User-entered time entries kept separate from estimates, with per-entry and daily limits.
 - Governed deletion previews that preserve timed subtasks when an epic is deleted.
+- Deterministic decomposition classification, focused readiness clarification, and strictly validated read-only AI proposals.
 - Date-based daily journal and previous-entry review.
 - Local-model assistant with explicit task/journal access controls.
 - User-controlled memory, disabled by default.
@@ -240,10 +242,13 @@ pytest -q
 ## Ethical safeguards
 
 - Rule-based prioritization is visibly separated from AI explanation.
+- Ranking explanations are requested deliberately, cached only in memory, and displayed as untrusted model text beside the application facts.
 - The model receives only user-selected, minimized records.
 - No cloud calls, telemetry, internet tools, email, calendar, commands, or unrestricted file/database access exist.
 - Hardware detection uses local operating-system information only.
 - The model cannot write to SQLite.
+- Task-decomposition output is strict JSON validated for identity, fields, lengths, estimates, dates, sequences, prerequisite references, cycles, advisories, and unsafe instructions.
+- Validated decomposition drafts may be stored without creating tasks, hierarchy links, dependencies, or time entries.
 - AI-requested writes must use a proposal object and require application-side confirmation.
 - Persistent memory is off by default and is editable and deletable.
 - Audit history is local and deletable.
@@ -292,7 +297,7 @@ Browser opening can fail in remote shells, containers, or systems without a grap
 - Single-user local prototype; it has per-launch service tokens but no user-account system or encryption-at-rest layer.
 - Small local models may produce weak or invalid answers.
 - Unsupported or unavailable acceleration falls back to CPU and may be slower.
-- The current UI supports direct user task CRUD. The proposal confirmation service and schema are implemented and tested; a future UI iteration can add structured proposal extraction for additional model-driven write requests.
+- Phase 6 decomposition proposals are read-only. Editing, item selection, approval, provenance changes from review edits, and transactional task insertion are intentionally deferred to Phase 7.
 - No external information is available to the assistant.
 
 
@@ -356,6 +361,9 @@ Screenshots are written to `docs/screenshots/light/` and `docs/screenshots/dark/
 - [x] Multiple dated time entries with 12-hour entry and 24-hour daily limits
 - [x] Governed task deletion with timed-subtask preservation and deletion audit
 - [x] Deterministic focus ordering with visible rule explanations
+- [x] Typed ranking facts, deliberate grounded AI explanations, cache invalidation, and deterministic fallback
+- [x] Deterministic decomposition classification and readiness clarification
+- [x] Strict read-only decomposition proposals with bounded advisories and safe draft persistence
 - [x] Local SQLite persistence and sample data
 - [x] Local llama.cpp model server with real inference verification
 - [x] Recommended `unsloth/Qwen3.5-0.8B-GGUF` model

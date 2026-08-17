@@ -15,9 +15,14 @@ from src.repositories.database import Database
 from src.repositories.dependency_repository import DependencyRepository
 from src.repositories.governance_repository import GovernanceRepository
 from src.repositories.journal_repository import JournalRepository
+from src.repositories.planning_repository import PlanningRepository
 from src.repositories.task_repository import TaskRepository
 from src.repositories.time_entry_repository import TimeEntryRepository
 from src.services.context_service import ContextService
+from src.services.planning_service import (
+    Phase6ValidationError,
+    PlanningService,
+)
 from src.services.task_service import (
     DESCRIPTION_MAX_LENGTH,
     EPIC_ESTIMATE_MAX_HOURS,
@@ -56,15 +61,20 @@ def services():
     time_entries = TimeEntryRepository(db)
     journals = JournalRepository(db)
     governance = GovernanceRepository(db)
+    planning = PlanningRepository(db)
+    model = LocalModelClient(MODEL_BASE_URL, MODEL_NAME, api_key=MODEL_API_KEY)
+    task_service = TaskService(tasks, dependencies)
     return (
         tasks,
         dependencies,
         journals,
         governance,
-        TaskService(tasks, dependencies),
+        planning,
+        task_service,
         TimeEntryService(time_entries, tasks),
         ContextService(tasks, journals),
-        LocalModelClient(MODEL_BASE_URL, MODEL_NAME, api_key=MODEL_API_KEY),
+        model,
+        PlanningService(task_service, planning, model),
     )
 
 
@@ -73,10 +83,12 @@ def services():
     dependencies,
     journals,
     governance,
+    planning,
     task_service,
     time_entry_service,
     context_service,
     llm,
+    planning_service,
 ) = services()
 
 if "page" not in st.session_state:
@@ -96,6 +108,21 @@ if "pending_dependency_offer" not in st.session_state:
 
 if "pending_delete_task_id" not in st.session_state:
     st.session_state.pending_delete_task_id = None
+
+if "ranking_ai_explanations" not in st.session_state:
+    st.session_state.ranking_ai_explanations = {}
+
+if "breakdown_task_id" not in st.session_state:
+    st.session_state.breakdown_task_id = None
+
+if "breakdown_answers" not in st.session_state:
+    st.session_state.breakdown_answers = {}
+
+if "breakdown_result" not in st.session_state:
+    st.session_state.breakdown_result = None
+
+if "breakdown_error" not in st.session_state:
+    st.session_state.breakdown_error = ""
 
 pending_page = st.session_state.pending_page
 
@@ -145,6 +172,154 @@ def format_minutes(minutes: int) -> str:
     if hours:
         return f"{hours}h"
     return f"{remainder}m"
+
+
+def render_breakdown_planning(task) -> None:
+    """Render Phase 6 proposal generation without applying any task changes."""
+    st.subheader("AI-assisted breakdown")
+    classification = planning_service.classify(task)
+    st.markdown(
+        f"**Deterministic classification:** `{classification.category}`"
+    )
+    st.caption(classification.reason)
+    if classification.prominent_recommendation:
+        st.warning(
+            "This estimate is 40 hours or more. Breaking the work into smaller "
+            "reviewable tasks is strongly recommended, but remains optional."
+        )
+
+    active = st.session_state.breakdown_task_id == task.id
+    if not active and st.button(
+        "Request Breakdown",
+        key=f"request_breakdown_{task.id}",
+    ):
+        st.session_state.breakdown_task_id = task.id
+        st.session_state.breakdown_answers = {}
+        st.session_state.breakdown_result = None
+        st.session_state.breakdown_error = ""
+        st.rerun()
+    if not active:
+        st.caption(
+            "Any task may be submitted manually. This does not change its "
+            "deterministic classification or create subtasks."
+        )
+        return
+
+    answers = dict(st.session_state.breakdown_answers)
+    readiness = planning_service.readiness(task, answers)
+    if not readiness.ready:
+        st.info(
+            "More information is needed before an approval-ready proposal can "
+            "be requested. No answers will be invented."
+        )
+        with st.form(f"breakdown_clarification_{task.id}"):
+            pending_answers = {}
+            for field, question in readiness.questions:
+                pending_answers[field] = st.text_area(
+                    question,
+                    value=answers.get(field, ""),
+                    key=f"breakdown_{task.id}_{field}",
+                    max_chars=DESCRIPTION_MAX_LENGTH,
+                )
+            if st.form_submit_button("Save clarification answers"):
+                answers.update(
+                    {
+                        key: value.strip()
+                        for key, value in pending_answers.items()
+                        if value.strip()
+                    }
+                )
+                st.session_state.breakdown_answers = answers
+                st.session_state.breakdown_error = ""
+                st.rerun()
+        st.caption(
+            "An approval-ready or SQLite-ready proposal will not be generated "
+            "while material context is missing."
+        )
+    else:
+        st.success(
+            "The selected task has sufficient information to request a structured proposal."
+        )
+        if st.session_state.breakdown_result is None and st.button(
+            "Generate read-only proposal",
+            key=f"generate_breakdown_{task.id}",
+        ):
+            try:
+                result = planning_service.request_decomposition(task, answers)
+                st.session_state.breakdown_result = result
+                st.session_state.breakdown_error = ""
+                st.rerun()
+            except (LocalModelError, Phase6ValidationError, ValueError) as exc:
+                st.session_state.breakdown_error = str(exc)
+
+    if st.session_state.breakdown_error:
+        st.warning(
+            "The local model did not return a valid proposal. The original task "
+            "was not changed."
+        )
+        st.caption(st.session_state.breakdown_error)
+        if readiness.ready and st.button(
+            "Retry proposal",
+            key=f"retry_breakdown_{task.id}",
+        ):
+            st.session_state.breakdown_error = ""
+            try:
+                result = planning_service.request_decomposition(task, answers)
+                st.session_state.breakdown_result = result
+                st.rerun()
+            except (LocalModelError, Phase6ValidationError, ValueError) as exc:
+                st.session_state.breakdown_error = str(exc)
+
+    result = st.session_state.breakdown_result
+    if result is not None and result.proposal.parent_task_id == task.id:
+        proposal = result.proposal
+        st.markdown("**Validated proposal — read-only preview**")
+        st.caption(
+            "Proposal wording is untrusted local-model output. Application validation "
+            "does not mean the proposal has been approved or applied."
+        )
+        st.caption(
+            f"Parent: {task_identity(task)} · Proposal: {proposal.proposal_id} · "
+            "Confirmation required"
+        )
+        st.write(proposal.summary)
+        if result.reused:
+            st.caption("Reused the unchanged validated draft; the model was not called again.")
+        for warning in proposal.warnings:
+            st.warning(warning)
+        for item in proposal.subtasks:
+            with st.expander(
+                f"{item.suggested_sequence}. {item.title}",
+                expanded=True,
+            ):
+                st.write(item.description or "No description supplied.")
+                st.caption(
+                    f"Estimate: {item.estimated_hours:g} hours · "
+                    f"User priority: {item.priority} · "
+                    f"Due: {format_date(item.due_date)} · "
+                    f"Provenance: {item.provenance}"
+                )
+                st.markdown(f"**Definition of done:** {item.completion_criterion}")
+                if item.prerequisite_item_keys:
+                    st.markdown(
+                        "**Proposed prerequisites:** "
+                        + ", ".join(item.prerequisite_item_keys)
+                    )
+        if proposal.advisories:
+            st.markdown("**Suggestions**")
+            for advisory in proposal.advisories:
+                st.info(f"{advisory.kind.replace('_', ' ').title()}: {advisory.message}")
+
+    if st.button("Cancel breakdown", key=f"cancel_breakdown_{task.id}"):
+        result = st.session_state.breakdown_result
+        if result is not None:
+            planning.set_status(result.proposal.proposal_id, "cancelled")
+        st.session_state.breakdown_task_id = None
+        st.session_state.breakdown_answers = {}
+        st.session_state.breakdown_result = None
+        st.session_state.breakdown_error = ""
+        st.info("Breakdown cancelled. No task or structural records were created.")
+        st.rerun()
 
 
 def navigate_to(page_name: str) -> None:
@@ -427,8 +602,48 @@ if page == "Today":
     focus = task_service.focus_items()
     if not focus:
         st.info("No open, unblocked tasks are available.")
-    for task in focus:
-        task_card(task, task_service.explain_rule_selection(task), open_task, "focus")
+    for position, task in enumerate(focus, start=1):
+        facts = task_service.ranking_facts(task, position)
+        task_card(task, facts.deterministic_explanation, open_task, "focus")
+        with st.expander(
+            f"Deterministic ranking facts · calculated position {position}",
+            expanded=False,
+        ):
+            st.json(facts.to_dict())
+            st.caption(
+                "User-assigned priority is an input. The calculated focus "
+                "position is the application-rule result."
+            )
+        stored_explanation = st.session_state.ranking_ai_explanations.get(task.id)
+        if (
+            stored_explanation is not None
+            and stored_explanation["facts"] != facts.to_dict()
+        ):
+            del st.session_state.ranking_ai_explanations[task.id]
+            stored_explanation = None
+        action_label = (
+            "Retry AI explanation"
+            if stored_explanation is not None
+            and not stored_explanation["result"].used_ai
+            else "Explain with AI"
+        )
+        if st.button(action_label, key=f"explain_focus_{task.id}"):
+            result = planning_service.explain_with_ai(facts)
+            st.session_state.ranking_ai_explanations[task.id] = {
+                "facts": facts.to_dict(),
+                "result": result,
+            }
+            st.rerun()
+        stored_explanation = st.session_state.ranking_ai_explanations.get(task.id)
+        if stored_explanation is not None:
+            result = stored_explanation["result"]
+            if result.used_ai:
+                st.markdown("**Untrusted local AI explanation**")
+                st.text(result.text)
+            else:
+                st.info(result.message)
+                st.markdown("**Deterministic fallback**")
+                st.text(result.text)
 
     st.subheader("Due today")
     if due:
@@ -495,6 +710,8 @@ elif page == "Tasks":
             if reopen_task(selected_task.id):
                 st.success("Task reopened.")
             st.rerun()
+
+        render_breakdown_planning(selected_task)
 
         children = tasks.list_subtasks(selected_task.id)
         if selected_task.task_type == "epic":

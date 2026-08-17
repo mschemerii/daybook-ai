@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
 
-from src.models.entities import ProposedAction, Task
+from src.models.entities import ProposedAction, RankingFacts, Task
 from src.repositories.dependency_repository import DependencyRepository
 from src.repositories.task_repository import TaskRepository
 from src.utils.dates import format_date
@@ -199,6 +199,43 @@ class TaskService:
             return bucket, PRIORITY_WEIGHT.get(task.priority, 99), due, task.id or 0
 
         return sorted(tasks, key=key)[:limit]
+
+    def ranking_facts(
+        self,
+        task: Task,
+        calculated_position: int,
+        today: date | None = None,
+    ) -> RankingFacts:
+        """Return typed application facts without asking AI to rank anything."""
+        today = today or date.today()
+        days_until_due = (
+            (task.due_date - today).days if task.due_date is not None else None
+        )
+        if days_until_due is None:
+            due_proximity = "no_due_date"
+        elif days_until_due < 0:
+            due_proximity = "overdue"
+        elif days_until_due == 0:
+            due_proximity = "due_today"
+        else:
+            due_proximity = "upcoming"
+        blockers = tuple(
+            f"{item.title} (task {item.id})"
+            for item in self.blocking_prerequisites(task.id)
+        )
+        return RankingFacts(
+            task_id=int(task.id),
+            calculated_focus_position=calculated_position,
+            user_priority=task.priority,
+            status=task.status,
+            due_date=task.due_date,
+            is_overdue=bool(days_until_due is not None and days_until_due < 0),
+            due_proximity=due_proximity,
+            days_until_due=days_until_due,
+            estimated_hours=task.estimated_hours,
+            incomplete_blockers=blockers,
+            deterministic_explanation=self.explain_rule_selection(task, today),
+        )
 
     def due_today(self, today: date | None = None) -> list[Task]:
         today = today or date.today()
