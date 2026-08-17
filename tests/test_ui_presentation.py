@@ -165,3 +165,14 @@ def test_phase6_generation_and_phase7_review_have_explicit_boundaries() -> None:
     assert '"Cancel breakdown"' in app_source
     assert "Untrusted local AI explanation" in app_source
     assert "Deterministic fallback" in app_source
+
+def test_task_estimate_is_directly_optional_and_origin_is_application_controlled() -> None:
+    app_source = APP_FILE.read_text(encoding="utf-8")
+
+    assert '"Set estimated duration"' not in app_source
+    assert '"Source or provenance"' not in app_source
+    assert 'placeholder="Optional"' in app_source
+    assert '"estimated_hours": estimated_hours' in app_source
+    assert 'source="User"' in app_source
+    assert '"Task origin"' in app_source
+    assert "recorded automatically" in app_source
