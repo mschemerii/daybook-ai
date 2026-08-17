@@ -15,7 +15,7 @@ Prohibited: external communication, internet use, command execution, file access
 """
 
 RANKING_EXPLANATION_PROMPT_VERSION = "ranking-explanation-v1"
-DECOMPOSITION_PROMPT_VERSION = "task-decomposition-v1"
+DECOMPOSITION_PROMPT_VERSION = "task-decomposition-v2"
 
 RANKING_EXPLANATION_SYSTEM_PROMPT = """You translate application-supplied ranking facts into one concise explanation.
 The application rules already calculated the focus position; never rank, reorder, or override it.
@@ -30,7 +30,7 @@ Return exactly one JSON object and no markdown. Use exactly these top-level keys
 proposal_type must be task_decomposition. Echo the supplied parent_task_id and application-generated proposal_id exactly. requires_confirmation must be true.
 Return 2 through 8 subtasks. Every subtask must use exactly these keys: item_key, title, description, estimated_hours, priority, suggested_sequence, completion_criterion, due_date, prerequisite_item_keys.
 Use short proposal-local item_key values, unique 1-based sequence numbers, quarter-hour estimates, ISO dates or null, and prerequisite references only to item_key values in this proposal. priority must echo selected_task.user_priority exactly; the application owns and validates that inherited default.
-Advisories use exactly kind and message. kind may be blocker, risk, missing_information, or milestone. Return no more than five.
+advisories is always required. If there are no advisories, return exactly "advisories": []. Never omit this key.\nAdvisories use exactly kind and message. kind may be blocker, risk, missing_information, or milestone. Return no more than five.
 Never include SQL, database/table names, record IDs for children, timestamps, audit fields, approval state, executable actions, claims of completed work, or hidden reasoning.
 """
 
