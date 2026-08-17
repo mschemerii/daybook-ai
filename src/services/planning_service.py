@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -18,10 +18,14 @@ from src.agent.local_llm import (
 from src.models.entities import (
     DecompositionClassification,
     DecompositionProposal,
+    ApprovalResult,
     ProposalAdvisory,
+    ProposalReview,
     ProposedSubtask,
     RankingFacts,
     ReadinessAssessment,
+    ReviewItem,
+    ReviewValidation,
     Task,
     ValidatedDecompositionProposal,
 )
@@ -31,7 +35,9 @@ from src.services.task_service import (
     STANDARD_ESTIMATE_MAX_HOURS,
     TITLE_MAX_LENGTH,
     VALID_PRIORITIES,
+    VALID_STATUSES,
     TaskService,
+    TaskValidationError,
 )
 
 MAX_SUMMARY_LENGTH = 1_000
@@ -61,6 +67,21 @@ SUBTASK_FIELDS = {
     "prerequisite_item_keys",
 }
 ADVISORY_FIELDS = {"kind", "message"}
+REVIEW_ITEM_FIELDS = {
+    "item_key",
+    "title",
+    "description",
+    "estimated_hours",
+    "priority",
+    "status",
+    "completion_criterion",
+    "due_date",
+    "prerequisite_item_keys",
+    "selected",
+    "display_order",
+    "origin",
+    "original_content",
+}
 
 UNSAFE_ACTIONABLE_PATTERNS = (
     r"\b(?:select|insert|update|delete)\b.{0,40}\b(?:from|into|set|where)\b",
@@ -97,6 +118,10 @@ class Phase6ValidationError(ValueError):
     """Raised when untrusted model output fails the Phase 6 contract."""
 
 
+class Phase7ValidationError(ValueError):
+    """Raised when reviewed application state is not safe to approve."""
+
+
 @dataclass(frozen=True, slots=True)
 class ExplanationResult:
     text: str
@@ -113,7 +138,7 @@ class ProposalResult:
 
 
 class PlanningService:
-    """Owns Phase 6 AI boundaries; it never creates or updates tasks."""
+    """Owns AI proposal boundaries and the human review/approval workflow."""
 
     def __init__(
         self,
@@ -379,6 +404,491 @@ class PlanningService:
         )
         self.proposals.save(stored)
         return ProposalResult(validated, fingerprint)
+
+    @staticmethod
+    def _original_content(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "title": item["title"],
+            "description": item["description"],
+            "estimated_hours": float(item["estimated_hours"]),
+            "priority": item["priority"],
+            "status": "Open",
+            "completion_criterion": item["completion_criterion"],
+            "due_date": item["due_date"],
+        }
+
+    @classmethod
+    def _review_from_stored(cls, stored: DecompositionProposal) -> ProposalReview:
+        try:
+            payload = json.loads(stored.payload_json)
+            if (
+                payload.get("proposal_type") != PROPOSAL_TYPE
+                or payload.get("proposal_id") != stored.proposal_id
+                or payload.get("parent_task_id") != stored.parent_task_id
+                or payload.get("requires_confirmation") is not True
+            ):
+                raise Phase7ValidationError(
+                    "The persisted proposal identity or approval boundary is inconsistent."
+                )
+            original_items = payload["subtasks"]
+            raw_review = payload.get("review")
+            if raw_review is None:
+                items = tuple(
+                    ReviewItem(
+                        item_key=item["item_key"],
+                        title=item["title"],
+                        description=item["description"],
+                        estimated_hours=float(item["estimated_hours"]),
+                        priority=item["priority"],
+                        status="Open",
+                        completion_criterion=item["completion_criterion"],
+                        due_date=date.fromisoformat(item["due_date"])
+                        if item["due_date"]
+                        else None,
+                        prerequisite_item_keys=tuple(item["prerequisite_item_keys"]),
+                        selected=True,
+                        display_order=index,
+                        origin="ai",
+                        original_content=cls._original_content(item),
+                    )
+                    for index, item in enumerate(original_items, start=1)
+                )
+            else:
+                if raw_review.get("version") != 1 or not isinstance(
+                    raw_review.get("items"), list
+                ):
+                    raise Phase7ValidationError(
+                        "The persisted review format is unsupported."
+                    )
+                for item in raw_review["items"]:
+                    if not isinstance(item, dict) or set(item) != REVIEW_ITEM_FIELDS:
+                        raise Phase7ValidationError(
+                            "A persisted review item has invalid fields."
+                        )
+                    if type(item["selected"]) is not bool or type(
+                        item["display_order"]
+                    ) is not int:
+                        raise Phase7ValidationError(
+                            "A persisted review selection or display order is invalid."
+                        )
+                items = tuple(
+                    ReviewItem(
+                        item_key=item["item_key"],
+                        title=item["title"],
+                        description=item["description"],
+                        estimated_hours=float(item["estimated_hours"]),
+                        priority=item["priority"],
+                        status=item["status"],
+                        completion_criterion=item["completion_criterion"],
+                        due_date=date.fromisoformat(item["due_date"])
+                        if item["due_date"]
+                        else None,
+                        prerequisite_item_keys=tuple(item["prerequisite_item_keys"]),
+                        selected=item["selected"],
+                        display_order=item["display_order"],
+                        origin=item["origin"],
+                        original_content=item.get("original_content"),
+                    )
+                    for item in raw_review["items"]
+                )
+        except Phase7ValidationError:
+            raise
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise Phase7ValidationError(
+                "The persisted proposal review state is malformed."
+            ) from exc
+        return ProposalReview(
+            proposal_id=stored.proposal_id,
+            parent_task_id=stored.parent_task_id,
+            summary=payload["summary"],
+            status=stored.status,
+            items=tuple(sorted(items, key=lambda item: item.display_order)),
+            advisories=tuple(
+                ProposalAdvisory(item["kind"], item["message"])
+                for item in payload.get("advisories", ())
+            ),
+        )
+
+    def get_review(self, proposal_id: str) -> ProposalReview:
+        return self._review_from_stored(self.proposals.get(proposal_id))
+
+    def _save_review(self, review: ProposalReview) -> ProposalReview:
+        stored = self.proposals.get(review.proposal_id)
+        if stored.status != "draft":
+            raise Phase7ValidationError(
+                f"A {stored.status} proposal cannot be edited as a draft."
+            )
+        payload = json.loads(stored.payload_json)
+        payload["review"] = {
+            "version": 1,
+            "items": [
+                item.to_dict()
+                for item in sorted(review.items, key=lambda value: value.display_order)
+            ],
+        }
+        self.proposals.update_payload(
+            review.proposal_id,
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        )
+        return self.get_review(review.proposal_id)
+
+    @staticmethod
+    def _replace_review_item(
+        review: ProposalReview,
+        item_key: str,
+        replacement: ReviewItem | None,
+    ) -> ProposalReview:
+        found = False
+        items: list[ReviewItem] = []
+        for item in review.items:
+            if item.item_key == item_key:
+                found = True
+                if replacement is not None:
+                    items.append(replacement)
+            else:
+                items.append(item)
+        if not found:
+            raise KeyError(f"Review item {item_key} not found")
+        items = [replace(item, display_order=index) for index, item in enumerate(
+            sorted(items, key=lambda value: value.display_order), start=1
+        )]
+        return replace(review, items=tuple(items))
+
+    def update_review_item(
+        self,
+        proposal_id: str,
+        item_key: str,
+        changes: dict[str, Any],
+    ) -> ProposalReview:
+        allowed = {
+            "title", "description", "estimated_hours", "priority", "status",
+            "completion_criterion", "due_date",
+        }
+        unsupported = set(changes) - allowed
+        if unsupported:
+            raise Phase7ValidationError(
+                "Unsupported review fields: " + ", ".join(sorted(unsupported))
+            )
+        review = self.get_review(proposal_id)
+        item = next((value for value in review.items if value.item_key == item_key), None)
+        if item is None:
+            raise KeyError(f"Review item {item_key} not found")
+        values = item.content_dict()
+        values.update(changes)
+        if isinstance(values.get("due_date"), str):
+            try:
+                values["due_date"] = date.fromisoformat(values["due_date"])
+            except ValueError as exc:
+                raise Phase7ValidationError("A reviewed due date is invalid.") from exc
+        if values.get("due_date") is not None and type(values["due_date"]) is not date:
+            raise Phase7ValidationError("A reviewed due date must be a calendar date.")
+        try:
+            TaskService._validate_values(
+                values, task_type="standard", require_title=True
+            )
+        except TaskValidationError as exc:
+            raise Phase7ValidationError(str(exc)) from exc
+        if values["priority"] not in VALID_PRIORITIES or values["status"] not in VALID_STATUSES:
+            raise Phase7ValidationError("A reviewed task field is invalid.")
+        values["estimated_hours"] = float(values["estimated_hours"])
+        updated = replace(
+            item,
+            title=str(values["title"]).strip(),
+            description=values["description"],
+            estimated_hours=values["estimated_hours"],
+            priority=values["priority"],
+            status=values["status"],
+            completion_criterion=values["completion_criterion"],
+            due_date=values["due_date"],
+        )
+        return self._save_review(
+            self._replace_review_item(review, item_key, updated)
+        )
+
+    def add_review_item(
+        self,
+        proposal_id: str,
+        *,
+        title: str,
+        description: str = "",
+        estimated_hours: float = 0.25,
+        priority: str | None = None,
+        status: str = "Open",
+        completion_criterion: str = "",
+        due_date: date | None = None,
+    ) -> ProposalReview:
+        review = self.get_review(proposal_id)
+        parent = self.tasks.repo.get(review.parent_task_id)
+        values = {
+            "title": title,
+            "description": description,
+            "estimated_hours": estimated_hours,
+            "priority": priority or parent.priority,
+            "status": status,
+            "completion_criterion": completion_criterion,
+            "due_date": due_date,
+        }
+        if due_date is not None and type(due_date) is not date:
+            raise Phase7ValidationError("A reviewed due date must be a calendar date.")
+        try:
+            TaskService._validate_values(values, task_type="standard", require_title=True)
+        except TaskValidationError as exc:
+            raise Phase7ValidationError(str(exc)) from exc
+        item = ReviewItem(
+            item_key=f"manual-{uuid.uuid4().hex}",
+            title=title.strip(),
+            description=description,
+            estimated_hours=float(estimated_hours),
+            priority=values["priority"],
+            status=status,
+            completion_criterion=completion_criterion,
+            due_date=due_date,
+            prerequisite_item_keys=(),
+            selected=True,
+            display_order=len(review.items) + 1,
+            origin="user",
+            original_content=None,
+        )
+        return self._save_review(replace(review, items=(*review.items, item)))
+
+    def remove_review_item(self, proposal_id: str, item_key: str) -> ProposalReview:
+        review = self.get_review(proposal_id)
+        return self._save_review(self._replace_review_item(review, item_key, None))
+
+    def set_review_item_selected(
+        self, proposal_id: str, item_key: str, selected: bool
+    ) -> ProposalReview:
+        if not isinstance(selected, bool):
+            raise Phase7ValidationError("Selection must be true or false.")
+        review = self.get_review(proposal_id)
+        item = next((value for value in review.items if value.item_key == item_key), None)
+        if item is None:
+            raise KeyError(f"Review item {item_key} not found")
+        return self._save_review(
+            self._replace_review_item(review, item_key, replace(item, selected=selected))
+        )
+
+    def set_review_prerequisites(
+        self, proposal_id: str, item_key: str, prerequisite_item_keys: list[str]
+    ) -> ProposalReview:
+        if not isinstance(prerequisite_item_keys, list) or not all(
+            isinstance(key, str) for key in prerequisite_item_keys
+        ):
+            raise Phase7ValidationError("Prerequisites must be proposal-local item keys.")
+        review = self.get_review(proposal_id)
+        item = next((value for value in review.items if value.item_key == item_key), None)
+        if item is None:
+            raise KeyError(f"Review item {item_key} not found")
+        return self._save_review(
+            self._replace_review_item(
+                review,
+                item_key,
+                replace(item, prerequisite_item_keys=tuple(prerequisite_item_keys)),
+            )
+        )
+
+    def reorder_review_items(
+        self, proposal_id: str, ordered_item_keys: list[str]
+    ) -> ProposalReview:
+        review = self.get_review(proposal_id)
+        current = {item.item_key: item for item in review.items}
+        if len(ordered_item_keys) != len(set(ordered_item_keys)) or set(
+            ordered_item_keys
+        ) != set(current):
+            raise Phase7ValidationError(
+                "Reordering must include every review item exactly once."
+            )
+        items = tuple(
+            replace(current[key], display_order=index)
+            for index, key in enumerate(ordered_item_keys, start=1)
+        )
+        return self._save_review(replace(review, items=items))
+
+    def move_review_item(
+        self, proposal_id: str, item_key: str, direction: int
+    ) -> ProposalReview:
+        if direction not in {-1, 1}:
+            raise Phase7ValidationError("Review items move one position at a time.")
+        review = self.get_review(proposal_id)
+        keys = [item.item_key for item in review.items]
+        if item_key not in keys:
+            raise KeyError(f"Review item {item_key} not found")
+        index = keys.index(item_key)
+        target = index + direction
+        if target < 0 or target >= len(keys):
+            return review
+        keys[index], keys[target] = keys[target], keys[index]
+        return self.reorder_review_items(proposal_id, keys)
+
+    @classmethod
+    def _validate_review_payload(
+        cls,
+        parent: Task,
+        stored: DecompositionProposal,
+    ) -> ReviewValidation:
+        review = cls._review_from_stored(stored)
+        if review.status != "draft":
+            raise Phase7ValidationError(
+                f"A {review.status} proposal cannot be approved as a draft."
+            )
+        if review.parent_task_id != parent.id:
+            raise Phase7ValidationError("The current proposal parent is inconsistent.")
+        if parent.task_type not in {"standard", "epic"}:
+            raise Phase7ValidationError("The current parent hierarchy state is invalid.")
+        keys = [item.item_key for item in review.items]
+        if len(keys) != len(set(keys)):
+            raise Phase7ValidationError("Review item keys must be unique.")
+        if any(not re.fullmatch(r"[A-Za-z0-9_-]+", key) for key in keys):
+            raise Phase7ValidationError("A review item key is invalid.")
+        orders = [item.display_order for item in review.items]
+        if set(orders) != set(range(1, len(review.items) + 1)):
+            raise Phase7ValidationError(
+                "Review display order must be unique and contiguous."
+            )
+        selected = review.selected_items
+        if not 1 <= len(selected) <= 8:
+            raise Phase7ValidationError(
+                "Select between one and eight subtasks before approval."
+            )
+
+        payload = json.loads(stored.payload_json)
+        originals = {
+            item["item_key"]: cls._original_content(item)
+            for item in payload["subtasks"]
+        }
+        for item in review.items:
+            if item.item_key in originals:
+                if item.origin != "ai" or item.original_content != originals[item.item_key]:
+                    raise Phase7ValidationError(
+                        "AI item origin or original content failed provenance verification."
+                    )
+            elif (
+                item.origin != "user"
+                or item.original_content is not None
+                or not item.item_key.startswith("manual-")
+            ):
+                raise Phase7ValidationError(
+                    "A manually added item failed provenance verification."
+                )
+            if not item.selected:
+                continue
+            try:
+                TaskService._validate_values(
+                    item.content_dict(), task_type="standard", require_title=True
+                )
+            except TaskValidationError as exc:
+                raise Phase7ValidationError(
+                    f"{item.title or item.item_key}: {exc}"
+                ) from exc
+
+        selected_keys = {item.item_key for item in selected}
+        selected_by_key = {item.item_key: item for item in selected}
+        for item in selected:
+            prerequisites = item.prerequisite_item_keys
+            if len(prerequisites) != len(set(prerequisites)):
+                raise Phase7ValidationError(
+                    f"{item.title} has duplicate prerequisite references."
+                )
+            if item.item_key in prerequisites:
+                raise Phase7ValidationError(
+                    f"{item.title} cannot depend on itself."
+                )
+            missing = set(prerequisites) - selected_keys
+            if missing:
+                raise Phase7ValidationError(
+                    f"{item.title} references removed or deselected prerequisite(s): "
+                    + ", ".join(sorted(missing))
+                    + ". Select them again or remove the relationship."
+                )
+            if item.status == "Completed":
+                incomplete = [
+                    key
+                    for key in prerequisites
+                    if selected_by_key[key].status != "Completed"
+                ]
+                if incomplete:
+                    raise Phase7ValidationError(
+                        f"{item.title} cannot be completed while a selected "
+                        "prerequisite remains incomplete: "
+                        + ", ".join(incomplete)
+                        + "."
+                    )
+        try:
+            cls._validate_prerequisite_graph(
+                [
+                    ProposedSubtask(
+                        item_key=item.item_key,
+                        title=item.title,
+                        description=item.description,
+                        estimated_hours=item.estimated_hours,
+                        priority=item.priority,
+                        suggested_sequence=index,
+                        completion_criterion=item.completion_criterion,
+                        due_date=item.due_date,
+                        prerequisite_item_keys=item.prerequisite_item_keys,
+                    )
+                    for index, item in enumerate(selected, start=1)
+                ]
+            )
+        except Phase6ValidationError as exc:
+            raise Phase7ValidationError(str(exc)) from exc
+        warnings = cls._proposal_warnings(
+            parent,
+            [
+                ProposedSubtask(
+                    item_key=item.item_key,
+                    title=item.title,
+                    description=item.description,
+                    estimated_hours=item.estimated_hours,
+                    priority=item.priority,
+                    suggested_sequence=index,
+                    completion_criterion=item.completion_criterion,
+                    due_date=item.due_date,
+                    prerequisite_item_keys=item.prerequisite_item_keys,
+                    provenance=item.provenance,
+                )
+                for index, item in enumerate(selected, start=1)
+            ],
+        )
+        return ReviewValidation(review, warnings)
+
+    def validate_review(self, proposal_id: str) -> ReviewValidation:
+        stored = self.proposals.get(proposal_id)
+        try:
+            parent = self.tasks.repo.get(stored.parent_task_id)
+        except KeyError as exc:
+            raise Phase7ValidationError(
+                "The proposal parent task no longer exists."
+            ) from exc
+        return self._validate_review_payload(parent, stored)
+
+    def approve_review(
+        self,
+        proposal_id: str,
+        *,
+        failure_hook=None,
+    ) -> ApprovalResult:
+        def validate_current(parent: Task, payload_json: str) -> ReviewValidation:
+            stored = DecompositionProposal(
+                proposal_id=proposal_id,
+                parent_task_id=int(parent.id),
+                payload_json=payload_json,
+                fingerprint="",
+                status="draft",
+            )
+            return self._validate_review_payload(parent, stored)
+
+        return self.proposals.approve_atomically(
+            proposal_id, validate_current, failure_hook=failure_hook
+        )
+
+    def reject_review(self, proposal_id: str) -> ProposalReview:
+        self.proposals.close_draft(proposal_id, "rejected")
+        return self.get_review(proposal_id)
+
+    def cancel_review(self, proposal_id: str) -> ProposalReview:
+        self.proposals.close_draft(proposal_id, "cancelled")
+        return self.get_review(proposal_id)
 
     @classmethod
     def validate_decomposition_response(

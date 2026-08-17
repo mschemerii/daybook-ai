@@ -16,11 +16,13 @@ from src.repositories.dependency_repository import DependencyRepository
 from src.repositories.governance_repository import GovernanceRepository
 from src.repositories.journal_repository import JournalRepository
 from src.repositories.planning_repository import PlanningRepository
+from src.repositories.planning_repository import ApprovalIntegrityError
 from src.repositories.task_repository import TaskRepository
 from src.repositories.time_entry_repository import TimeEntryRepository
 from src.services.context_service import ContextService
 from src.services.planning_service import (
     Phase6ValidationError,
+    Phase7ValidationError,
     PlanningService,
 )
 from src.services.task_service import (
@@ -124,6 +126,9 @@ if "breakdown_result" not in st.session_state:
 if "breakdown_error" not in st.session_state:
     st.session_state.breakdown_error = ""
 
+if "breakdown_approval_result" not in st.session_state:
+    st.session_state.breakdown_approval_result = None
+
 pending_page = st.session_state.pending_page
 
 if pending_page is not None:
@@ -175,7 +180,7 @@ def format_minutes(minutes: int) -> str:
 
 
 def render_breakdown_planning(task) -> None:
-    """Render Phase 6 proposal generation without applying any task changes."""
+    """Render AI proposal generation and application-owned human review."""
     st.subheader("AI-assisted breakdown")
     classification = planning_service.classify(task)
     st.markdown(
@@ -273,52 +278,258 @@ def render_breakdown_planning(task) -> None:
     result = st.session_state.breakdown_result
     if result is not None and result.proposal.parent_task_id == task.id:
         proposal = result.proposal
-        st.markdown("**Validated proposal — read-only preview**")
+        review = planning_service.get_review(proposal.proposal_id)
+        st.markdown("**Persisted human-review draft**")
         st.caption(
             "Proposal wording is untrusted local-model output. Application validation "
-            "does not mean the proposal has been approved or applied."
+            "does not mean the proposal has been approved or applied. Every edit below "
+            "is revalidated by application code."
         )
         st.caption(
             f"Parent: {task_identity(task)} · Proposal: {proposal.proposal_id} · "
-            "Confirmation required"
+            f"Status: {review.status}"
         )
-        st.write(proposal.summary)
+        st.write(review.summary)
         if result.reused:
             st.caption("Reused the unchanged validated draft; the model was not called again.")
-        for warning in proposal.warnings:
-            st.warning(warning)
-        for item in proposal.subtasks:
+
+        validation = None
+        if review.status == "draft":
+            try:
+                validation = planning_service.validate_review(proposal.proposal_id)
+            except Phase7ValidationError as exc:
+                st.error(f"Approval blocked: {exc}")
+            else:
+                for warning in validation.warnings:
+                    st.warning(warning)
+
+        names = {item.item_key: item.title for item in review.items}
+        for item in review.items:
             with st.expander(
-                f"{item.suggested_sequence}. {item.title}",
+                f"{item.display_order}. {item.title} — {item.provenance}",
                 expanded=True,
             ):
-                st.write(item.description or "No description supplied.")
-                st.caption(
-                    f"Estimate: {item.estimated_hours:g} hours · "
-                    f"User priority: {item.priority} · "
-                    f"Due: {format_date(item.due_date)} · "
-                    f"Provenance: {item.provenance}"
-                )
-                st.markdown(f"**Definition of done:** {item.completion_criterion}")
-                if item.prerequisite_item_keys:
-                    st.markdown(
-                        "**Proposed prerequisites:** "
-                        + ", ".join(item.prerequisite_item_keys)
+                if review.status == "draft":
+                    with st.form(
+                        f"review_item_{proposal.proposal_id}_{item.item_key}"
+                    ):
+                        selected = st.checkbox(
+                            "Include in final structure",
+                            value=item.selected,
+                            key=f"selected_{proposal.proposal_id}_{item.item_key}",
+                        )
+                        title = st.text_input(
+                            "Title", item.title,
+                            max_chars=TITLE_MAX_LENGTH,
+                            key=f"title_{proposal.proposal_id}_{item.item_key}",
+                        )
+                        description = st.text_area(
+                            "Description", item.description,
+                            max_chars=DESCRIPTION_MAX_LENGTH,
+                            key=f"description_{proposal.proposal_id}_{item.item_key}",
+                        )
+                        completion = st.text_area(
+                            "Definition of done", item.completion_criterion,
+                            max_chars=DESCRIPTION_MAX_LENGTH,
+                            key=f"completion_{proposal.proposal_id}_{item.item_key}",
+                        )
+                        estimate = st.number_input(
+                            "Estimated hours", min_value=0.25,
+                            max_value=float(STANDARD_ESTIMATE_MAX_HOURS), step=0.25,
+                            value=float(item.estimated_hours),
+                            key=f"estimate_{proposal.proposal_id}_{item.item_key}",
+                        )
+                        priority = st.selectbox(
+                            "Priority", ["High", "Medium", "Low"],
+                            index=["High", "Medium", "Low"].index(item.priority),
+                            key=f"priority_{proposal.proposal_id}_{item.item_key}",
+                        )
+                        status = st.selectbox(
+                            "Status", ["Open", "In Progress", "Blocked", "Completed"],
+                            index=["Open", "In Progress", "Blocked", "Completed"].index(item.status),
+                            key=f"status_{proposal.proposal_id}_{item.item_key}",
+                        )
+                        due = st.date_input(
+                            "Due date (optional)", value=item.due_date,
+                            format="MM-DD-YYYY",
+                            key=f"due_{proposal.proposal_id}_{item.item_key}",
+                        )
+                        prerequisite_options = list(
+                            dict.fromkeys(
+                                [key for key in names if key != item.item_key]
+                                + list(item.prerequisite_item_keys)
+                            )
+                        )
+                        prerequisite_keys = st.multiselect(
+                            "Prerequisites",
+                            prerequisite_options,
+                            default=list(item.prerequisite_item_keys),
+                            format_func=lambda key: f"{names.get(key, key)} [{key}]",
+                            key=f"prerequisites_{proposal.proposal_id}_{item.item_key}",
+                        )
+                        if st.form_submit_button("Save item"):
+                            try:
+                                planning_service.update_review_item(
+                                    proposal.proposal_id,
+                                    item.item_key,
+                                    {
+                                        "title": title,
+                                        "description": description,
+                                        "completion_criterion": completion,
+                                        "estimated_hours": estimate,
+                                        "priority": priority,
+                                        "status": status,
+                                        "due_date": due,
+                                    },
+                                )
+                                planning_service.set_review_item_selected(
+                                    proposal.proposal_id, item.item_key, selected
+                                )
+                                planning_service.set_review_prerequisites(
+                                    proposal.proposal_id, item.item_key, prerequisite_keys
+                                )
+                                st.rerun()
+                            except (Phase7ValidationError, ValueError) as exc:
+                                st.error(str(exc))
+                    left, up, down, right = st.columns(4)
+                    if left.button(
+                        "Remove", key=f"remove_{proposal.proposal_id}_{item.item_key}"
+                    ):
+                        planning_service.remove_review_item(
+                            proposal.proposal_id, item.item_key
+                        )
+                        st.rerun()
+                    if up.button(
+                        "Move up", key=f"up_{proposal.proposal_id}_{item.item_key}"
+                    ):
+                        planning_service.move_review_item(
+                            proposal.proposal_id, item.item_key, -1
+                        )
+                        st.rerun()
+                    if down.button(
+                        "Move down", key=f"down_{proposal.proposal_id}_{item.item_key}"
+                    ):
+                        planning_service.move_review_item(
+                            proposal.proposal_id, item.item_key, 1
+                        )
+                        st.rerun()
+                    right.caption(f"Stable key: {item.item_key}")
+                else:
+                    st.write(item.description or "No description supplied.")
+                    st.caption(
+                        f"Estimate: {item.estimated_hours:g} hours · Priority: {item.priority} · "
+                        f"Due: {format_date(item.due_date)} · Provenance: {item.provenance}"
                     )
-        if proposal.advisories:
+
+        if review.status == "draft":
+            with st.form(f"manual_review_item_{proposal.proposal_id}"):
+                st.markdown("**Insert a manual subtask**")
+                manual_title = st.text_input(
+                    "Manual subtask title", max_chars=TITLE_MAX_LENGTH,
+                    key=f"manual_title_{proposal.proposal_id}",
+                )
+                manual_description = st.text_area(
+                    "Manual subtask description", max_chars=DESCRIPTION_MAX_LENGTH,
+                    key=f"manual_description_{proposal.proposal_id}",
+                )
+                manual_completion = st.text_area(
+                    "Manual definition of done", max_chars=DESCRIPTION_MAX_LENGTH,
+                    key=f"manual_completion_{proposal.proposal_id}",
+                )
+                manual_estimate = st.number_input(
+                    "Manual estimate", min_value=0.25,
+                    max_value=float(STANDARD_ESTIMATE_MAX_HOURS), step=0.25,
+                    value=0.25, key=f"manual_estimate_{proposal.proposal_id}",
+                )
+                if st.form_submit_button("Insert subtask"):
+                    try:
+                        planning_service.add_review_item(
+                            proposal.proposal_id,
+                            title=manual_title,
+                            description=manual_description,
+                            completion_criterion=manual_completion,
+                            estimated_hours=manual_estimate,
+                        )
+                        st.rerun()
+                    except Phase7ValidationError as exc:
+                        st.error(str(exc))
+
+        if review.advisories:
             st.markdown("**Suggestions**")
-            for advisory in proposal.advisories:
+            for advisory in review.advisories:
                 st.info(f"{advisory.kind.replace('_', ' ').title()}: {advisory.message}")
 
-    if st.button("Cancel breakdown", key=f"cancel_breakdown_{task.id}"):
-        result = st.session_state.breakdown_result
-        if result is not None:
-            planning.set_status(result.proposal.proposal_id, "cancelled")
+        selected = review.selected_items
+        st.markdown("**Final deterministic approval summary**")
+        for order, item in enumerate(selected, start=1):
+            prerequisites = ", ".join(
+                names.get(key, key) for key in item.prerequisite_item_keys
+            ) or "None"
+            st.write(
+                f"{order}. {item.title} — {item.estimated_hours:g}h — "
+                f"{format_date(item.due_date)} — {item.provenance} — "
+                f"prerequisites: {prerequisites}"
+            )
+
+        if review.status == "draft":
+            approve_col, reject_col, cancel_col = st.columns(3)
+            if approve_col.button(
+                "Approve and create subtasks",
+                type="primary",
+                disabled=validation is None,
+                key=f"approve_{proposal.proposal_id}",
+            ):
+                try:
+                    st.session_state.breakdown_approval_result = (
+                        planning_service.approve_review(proposal.proposal_id)
+                    )
+                    st.rerun()
+                except (Phase7ValidationError, ApprovalIntegrityError, ValueError, KeyError) as exc:
+                    st.error(str(exc))
+            if reject_col.button(
+                "Reject proposal", key=f"reject_{proposal.proposal_id}"
+            ):
+                planning_service.reject_review(proposal.proposal_id)
+                st.rerun()
+            if cancel_col.button(
+                "Cancel breakdown", key=f"cancel_breakdown_{task.id}"
+            ):
+                planning_service.cancel_review(proposal.proposal_id)
+                st.rerun()
+        elif review.status == "approved":
+            approval = st.session_state.breakdown_approval_result
+            if approval is None:
+                approval = planning_service.approve_review(proposal.proposal_id)
+            st.success(
+                f"Created {len(approval.item_task_ids)} subtasks. The parent is now an epic."
+            )
+            st.write(
+                ", ".join(
+                    f"{key} → task {task_id}"
+                    for key, task_id in approval.item_task_ids
+                )
+            )
+            if st.button(
+                "Verify approval result (no duplicates)",
+                key=f"repeat_approval_{proposal.proposal_id}",
+            ):
+                st.session_state.breakdown_approval_result = (
+                    planning_service.approve_review(proposal.proposal_id)
+                )
+                st.rerun()
+        else:
+            st.info(
+                f"This proposal was {review.status}. No task structure was created, "
+                "and it is no longer editable."
+            )
+    elif active and st.button(
+        "Cancel breakdown", key=f"cancel_uncreated_breakdown_{task.id}"
+    ):
         st.session_state.breakdown_task_id = None
         st.session_state.breakdown_answers = {}
         st.session_state.breakdown_result = None
         st.session_state.breakdown_error = ""
-        st.info("Breakdown cancelled. No task or structural records were created.")
+        st.session_state.breakdown_approval_result = None
         st.rerun()
 
 

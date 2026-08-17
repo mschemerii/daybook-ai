@@ -151,14 +151,17 @@ def test_task_card_css_includes_narrow_window_rules() -> None:
     assert "flex-basis:100%" in app_source
 
 
-def test_phase6_ui_is_deliberate_read_only_and_has_safe_fallbacks() -> None:
+def test_phase6_generation_and_phase7_review_have_explicit_boundaries() -> None:
     app_source = APP_FILE.read_text(encoding="utf-8")
 
     assert '"Explain with AI"' in app_source
     assert '"Request Breakdown"' in app_source
     assert '"Generate read-only proposal"' in app_source
-    assert "Validated proposal — read-only preview" in app_source
+    assert "Persisted human-review draft" in app_source
+    assert '"Approve and create subtasks"' in app_source
+    assert '"Reject proposal"' in app_source
+    assert "Final deterministic approval summary" in app_source
+    assert "Verify approval result (no duplicates)" in app_source
     assert '"Cancel breakdown"' in app_source
     assert "Untrusted local AI explanation" in app_source
     assert "Deterministic fallback" in app_source
-    assert '"Approve proposal"' not in app_source
