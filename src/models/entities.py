@@ -15,6 +15,12 @@ class Task:
     status: str = "Open"
     source: str = "User"
     notes: str = ""
+    estimated_hours: float | None = None
+    task_type: str = "standard"
+    parent_task_id: int | None = None
+    subtask_order: int | None = None
+    provenance: str = "user_created"
+    completion_criterion: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -28,7 +34,42 @@ class Task:
             "status": self.status,
             "source": self.source,
             "notes": self.notes,
+            "estimated_hours": self.estimated_hours,
+            "task_type": self.task_type,
+            "parent_task_id": self.parent_task_id,
+            "subtask_order": self.subtask_order,
+            "provenance": self.provenance,
+            "completion_criterion": self.completion_criterion,
         }
+
+
+@dataclass(slots=True)
+class TaskDependency:
+    dependent_task_id: int
+    prerequisite_task_id: int
+    created_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class TimeEntry:
+    id: int | None
+    task_id: int
+    work_date: date
+    minutes: int
+    note: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class DecompositionProposal:
+    proposal_id: str
+    parent_task_id: int
+    payload_json: str
+    fingerprint: str
+    status: str = "draft"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 @dataclass(slots=True)

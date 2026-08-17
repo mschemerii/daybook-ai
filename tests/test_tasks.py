@@ -48,3 +48,20 @@ def test_prohibited_action(task_service):
 def test_provenance_preserved(task_repo):
     task = task_repo.create(Task(None, "Imported", source="Meeting notes"))
     assert task.source == "Meeting notes"
+    assert task.provenance == "user_created"
+
+
+def test_v09_task_fields_round_trip(task_repo):
+    task = task_repo.create(
+        Task(
+            None,
+            "Planned work",
+            estimated_hours=2.25,
+            provenance="ai_generated_user_edited",
+            completion_criterion="The result is reviewed.",
+        )
+    )
+
+    assert task.estimated_hours == 2.25
+    assert task.provenance == "ai_generated_user_edited"
+    assert task.completion_criterion == "The result is reviewed."
