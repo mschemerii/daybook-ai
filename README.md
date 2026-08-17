@@ -8,6 +8,9 @@ Designed and coded by **Michael Schemer** as an Ethical AI course prototype.
 
 - Today view with open tasks, due-today tasks, blockers, and three rule-selected focus items.
 - Full local task CRUD with provenance.
+- Epic/subtask hierarchy and deterministic task dependencies with lifecycle guards.
+- User-entered time entries kept separate from estimates, with per-entry and daily limits.
+- Governed deletion previews that preserve timed subtasks when an epic is deleted.
 - Date-based daily journal and previous-entry review.
 - Local-model assistant with explicit task/journal access controls.
 - User-controlled memory, disabled by default.
@@ -349,6 +352,9 @@ Screenshots are written to `docs/screenshots/light/` and `docs/screenshots/dark/
 - [x] Today, Tasks, Daily Journal, Assistant, About, and Ethical AI pages
 - [x] Clickable task cards and editable task details
 - [x] Completed-task visibility and one-click reopening from Today
+- [x] Epic/subtask hierarchy, dependency blocking, and reopening cascades
+- [x] Multiple dated time entries with 12-hour entry and 24-hour daily limits
+- [x] Governed task deletion with timed-subtask preservation and deletion audit
 - [x] Deterministic focus ordering with visible rule explanations
 - [x] Local SQLite persistence and sample data
 - [x] Local llama.cpp model server with real inference verification

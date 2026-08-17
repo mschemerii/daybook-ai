@@ -12,12 +12,29 @@ from dotenv import load_dotenv
 from src.agent.local_llm import LocalModelClient, LocalModelError
 from src.models.entities import JournalEntry
 from src.repositories.database import Database
+from src.repositories.dependency_repository import DependencyRepository
 from src.repositories.governance_repository import GovernanceRepository
 from src.repositories.journal_repository import JournalRepository
 from src.repositories.task_repository import TaskRepository
+from src.repositories.time_entry_repository import TimeEntryRepository
 from src.services.context_service import ContextService
-from src.services.task_service import TaskService
-from src.ui.components import page_header, task_card
+from src.services.task_service import (
+    DESCRIPTION_MAX_LENGTH,
+    EPIC_ESTIMATE_MAX_HOURS,
+    STANDARD_ESTIMATE_MAX_HOURS,
+    TITLE_MAX_LENGTH,
+    DependencyOffer,
+    ReopenConfirmationRequired,
+    TaskService,
+    TaskValidationError,
+)
+from src.services.time_entry_service import (
+    MAX_ENTRY_MINUTES,
+    TIME_ENTRY_NOTE_MAX_LENGTH,
+    TimeEntryService,
+    TimeEntryValidationError,
+)
+from src.ui.components import format_estimated_hours, page_header, task_card
 from src.utils.dates import format_date, format_datetime
 
 load_dotenv()
@@ -35,19 +52,32 @@ PAGES = ["Today", "Tasks", "Daily Journal", "Assistant", "About", "Ethical AI"]
 def services():
     db = Database(DB_PATH)
     tasks = TaskRepository(db)
+    dependencies = DependencyRepository(db)
+    time_entries = TimeEntryRepository(db)
     journals = JournalRepository(db)
     governance = GovernanceRepository(db)
     return (
         tasks,
+        dependencies,
         journals,
         governance,
-        TaskService(tasks),
+        TaskService(tasks, dependencies),
+        TimeEntryService(time_entries, tasks),
         ContextService(tasks, journals),
         LocalModelClient(MODEL_BASE_URL, MODEL_NAME, api_key=MODEL_API_KEY),
     )
 
 
-tasks, journals, governance, task_service, context_service, llm = services()
+(
+    tasks,
+    dependencies,
+    journals,
+    governance,
+    task_service,
+    time_entry_service,
+    context_service,
+    llm,
+) = services()
 
 if "page" not in st.session_state:
     st.session_state.page = "Today"
@@ -57,6 +87,15 @@ if "selected_task_id" not in st.session_state:
 
 if "pending_page" not in st.session_state:
     st.session_state.pending_page = None
+
+if "pending_reopen_task_id" not in st.session_state:
+    st.session_state.pending_reopen_task_id = None
+
+if "pending_dependency_offer" not in st.session_state:
+    st.session_state.pending_dependency_offer = None
+
+if "pending_delete_task_id" not in st.session_state:
+    st.session_state.pending_delete_task_id = None
 
 pending_page = st.session_state.pending_page
 
@@ -78,9 +117,34 @@ def close_task() -> None:
     st.session_state.selected_task_id = None
 
 
-def reopen_task(task_id: int) -> None:
-    """Reopen a completed task from the Today page."""
-    task_service.reopen_task(task_id)
+def reopen_task(task_id: int) -> bool:
+    """Reopen immediately or queue a named dependency confirmation."""
+    try:
+        task_service.reopen_task(task_id)
+        return True
+    except ReopenConfirmationRequired:
+        st.session_state.pending_reopen_task_id = task_id
+        return False
+
+
+def task_identity(task) -> str:
+    """Identify duplicate titles unambiguously without widening the layout."""
+    if task.parent_task_id is not None:
+        try:
+            parent = tasks.get(task.parent_task_id)
+            return f"{task.title} — under {parent.title} (task {task.id})"
+        except KeyError:
+            pass
+    return f"{task.title} (task {task.id})"
+
+
+def format_minutes(minutes: int) -> str:
+    hours, remainder = divmod(minutes, 60)
+    if hours and remainder:
+        return f"{hours}h {remainder}m"
+    if hours:
+        return f"{hours}h"
+    return f"{remainder}m"
 
 
 def navigate_to(page_name: str) -> None:
@@ -89,6 +153,19 @@ def navigate_to(page_name: str) -> None:
 
     if page_name != "Tasks":
         st.session_state.selected_task_id = None
+
+
+def render_task_hierarchy(task, *, depth: int = 0) -> None:
+    if depth:
+        st.caption(f"{'↳ ' * depth}Subtask of the item above")
+    task_card(
+        task,
+        on_open=open_task,
+        key_prefix=f"all_level_{depth}",
+        blocking_prerequisites=task_service.blocking_prerequisites(task.id),
+    )
+    for child in tasks.list_subtasks(task.id):
+        render_task_hierarchy(child, depth=depth + 1)
 
 
 st.markdown(
@@ -295,6 +372,44 @@ with st.container(key="top_navigation"):
 
 page = st.session_state.page
 
+pending_reopen_id = st.session_state.pending_reopen_task_id
+if pending_reopen_id is not None:
+    try:
+        reopening_task = tasks.get(pending_reopen_id)
+        affected_tasks = task_service.reopen_affected_tasks(pending_reopen_id)
+    except KeyError:
+        st.session_state.pending_reopen_task_id = None
+        st.warning("That task no longer exists.")
+        st.rerun()
+
+    affected_names = ", ".join(task_identity(task) for task in affected_tasks)
+    st.warning(
+        f"Reopening {task_identity(reopening_task)} will also reopen completed "
+        "dependent tasks and block open dependents while prerequisites remain "
+        f"incomplete. Affected: {affected_names}"
+    )
+    confirm_reopen, cancel_reopen = st.columns(2)
+    if confirm_reopen.button(
+        "Confirm reopening cascade",
+        key="confirm_dependency_reopen",
+        use_container_width=True,
+    ):
+        task_service.reopen_task(
+            pending_reopen_id,
+            confirm_dependency_cascade=True,
+        )
+        st.session_state.pending_reopen_task_id = None
+        st.success("Task and affected dependents reopened.")
+        st.rerun()
+    if cancel_reopen.button(
+        "Cancel",
+        key="cancel_dependency_reopen",
+        use_container_width=True,
+    ):
+        st.session_state.pending_reopen_task_id = None
+        st.info("No task records were changed.")
+        st.rerun()
+
 if page == "Today":
     page_header("Today", "A compact, actionable view before focused work begins.")
     open_tasks = tasks.list_all(False)
@@ -325,7 +440,14 @@ if page == "Today":
     st.subheader("Current blockers")
     if blocked:
         for task in blocked:
-            task_card(task, on_open=open_task, key_prefix="blocked")
+            task_card(
+                task,
+                on_open=open_task,
+                key_prefix="blocked",
+                blocking_prerequisites=task_service.blocking_prerequisites(
+                    task.id
+                ),
+            )
     else:
         st.info("No blocked tasks.")
 
@@ -346,9 +468,9 @@ if page == "Today":
 
 elif page == "Tasks":
     selected_id = st.session_state.selected_task_id
-    selected_task = tasks.get(selected_id) if selected_id is not None else None
-
-    if selected_id is not None and selected_task is None:
+    try:
+        selected_task = tasks.get(selected_id) if selected_id is not None else None
+    except KeyError:
         st.warning("That task no longer exists.")
         close_task()
         st.rerun()
@@ -358,63 +480,640 @@ elif page == "Tasks":
         if st.button("← Back to all tasks"):
             close_task()
             st.rerun()
-        task_card(selected_task, key_prefix="detail")
+        dependency_blockers = task_service.blocking_prerequisites(
+            selected_task.id
+        )
+        task_card(
+            selected_task,
+            key_prefix="detail",
+            blocking_prerequisites=dependency_blockers,
+        )
+        if selected_task.status == "Completed" and st.button(
+            "Reopen task",
+            key=f"detail_reopen_{selected_task.id}",
+        ):
+            if reopen_task(selected_task.id):
+                st.success("Task reopened.")
+            st.rerun()
+
+        children = tasks.list_subtasks(selected_task.id)
+        if selected_task.task_type == "epic":
+            completed_children = sum(
+                child.status == "Completed" for child in children
+            )
+            original_estimate, child_estimate, completion = st.columns(3)
+            original_estimate.metric(
+                "Original epic estimate",
+                format_estimated_hours(selected_task.estimated_hours),
+            )
+            child_estimate.metric(
+                "Current subtask estimate",
+                format_estimated_hours(
+                    tasks.subtask_estimated_hours(selected_task.id)
+                ),
+            )
+            completion.metric(
+                "Completed subtasks",
+                f"{completed_children} of {len(children)}",
+            )
+
+        own_recorded_minutes = time_entry_service.recorded_minutes(
+            selected_task.id
+        )
+        total_recorded_minutes = time_entry_service.recorded_minutes(
+            selected_task.id,
+            include_descendants=selected_task.task_type == "epic",
+        )
+        if selected_task.task_type == "epic":
+            own_time, hierarchy_time = st.columns(2)
+            own_time.metric("Recorded on epic", format_minutes(own_recorded_minutes))
+            hierarchy_time.metric(
+                "Recorded across epic",
+                format_minutes(total_recorded_minutes),
+            )
+        else:
+            st.metric("Recorded time", format_minutes(own_recorded_minutes))
+
+        status_options = (
+            ["Completed"]
+            if selected_task.status == "Completed"
+            else ["Open", "In Progress", "Blocked"]
+        )
+        epic_has_incomplete_children = (
+            selected_task.task_type == "epic"
+            and any(child.status != "Completed" for child in children)
+        )
+        estimate_limit = float(
+            EPIC_ESTIMATE_MAX_HOURS
+            if selected_task.task_type == "epic"
+            else STANDARD_ESTIMATE_MAX_HOURS
+        )
         with st.form(f"edit_{selected_task.id}"):
-            title = st.text_input("Title", selected_task.title)
-            description = st.text_area("Description", selected_task.description)
-            priority = st.selectbox("Priority", ["High", "Medium", "Low"], index=["High", "Medium", "Low"].index(selected_task.priority))
-            use_due = st.checkbox("Set due date", value=selected_task.due_date is not None)
-            due_date = st.date_input("Due date", value=selected_task.due_date or date.today(), format="MM-DD-YYYY", disabled=not use_due)
-            status = st.selectbox("Status", ["Open", "In Progress", "Blocked", "Completed"], index=["Open", "In Progress", "Blocked", "Completed"].index(selected_task.status))
+            title = st.text_input(
+                "Title",
+                selected_task.title,
+                max_chars=TITLE_MAX_LENGTH,
+            )
+            description = st.text_area(
+                "Description",
+                selected_task.description,
+                max_chars=DESCRIPTION_MAX_LENGTH,
+            )
+            priority_values = ["High", "Medium", "Low"]
+            priority = st.selectbox(
+                "Priority",
+                priority_values,
+                index=priority_values.index(selected_task.priority),
+            )
+            use_due = st.checkbox(
+                "Set due date",
+                value=selected_task.due_date is not None,
+            )
+            due_date = st.date_input(
+                "Due date",
+                value=selected_task.due_date or date.today(),
+                format="MM-DD-YYYY",
+                disabled=not use_due,
+            )
+            use_estimate = st.checkbox(
+                "Set estimated duration",
+                value=selected_task.estimated_hours is not None,
+            )
+            estimated_hours = st.number_input(
+                "Estimated hours",
+                min_value=0.25,
+                max_value=estimate_limit,
+                value=float(selected_task.estimated_hours or 0.25),
+                step=0.25,
+                disabled=not use_estimate,
+            )
+            status = st.selectbox(
+                "Status",
+                status_options,
+                index=status_options.index(selected_task.status),
+                disabled=selected_task.status == "Completed",
+            )
             source = st.text_input("Source or provenance", selected_task.source)
             notes = st.text_area("Notes", selected_task.notes)
+            completion_criterion = st.text_area(
+                "Definition of done",
+                selected_task.completion_criterion,
+                max_chars=DESCRIPTION_MAX_LENGTH,
+            )
             save, complete, delete = st.columns(3)
             if save.form_submit_button("Save changes", use_container_width=True):
-                if not title.strip():
-                    st.error("Title is required.")
-                else:
+                try:
                     task_service.update_task(selected_task.id, {
                         "title": title.strip(), "description": description, "priority": priority,
                         "due_date": due_date if use_due else None, "status": status,
                         "source": source or "User", "notes": notes,
+                        "estimated_hours": estimated_hours if use_estimate else None,
+                        "completion_criterion": completion_criterion,
                     })
                     st.success("Task updated.")
                     st.rerun()
-            if complete.form_submit_button("Mark complete", use_container_width=True):
-                task_service.complete_task(selected_task.id)
-                st.success("Task completed.")
+                except (TaskValidationError, ValueError) as exc:
+                    st.error(str(exc))
+            if complete.form_submit_button(
+                "Mark complete",
+                use_container_width=True,
+                disabled=(
+                    selected_task.status == "Completed"
+                    or epic_has_incomplete_children
+                    or bool(dependency_blockers)
+                ),
+                help=(
+                    "Complete every subtask before closing the epic."
+                    if epic_has_incomplete_children
+                    else (
+                        "Incomplete prerequisites: "
+                        + ", ".join(
+                            task_identity(task)
+                            for task in dependency_blockers
+                        )
+                        if dependency_blockers
+                        else None
+                    )
+                ),
+            ):
+                try:
+                    task_service.complete_task(selected_task.id)
+                    st.success("Task completed.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+            if delete.form_submit_button(
+                "Review deletion",
+                use_container_width=True,
+            ):
+                st.session_state.pending_delete_task_id = selected_task.id
                 st.rerun()
-            if delete.form_submit_button("Delete task", use_container_width=True):
-                task_service.delete_task(selected_task.id)
+
+        if st.session_state.pending_delete_task_id == selected_task.id:
+            deletion = task_service.deletion_preview(selected_task.id)
+            st.warning(
+                f"Delete {task_identity(selected_task)}? This cannot be undone."
+            )
+            if deletion.deletes_recorded_time:
+                st.error(
+                    "This task has recorded time. Deleting it also deletes those "
+                    "time entries."
+                )
+            if deletion.preserved_tasks:
+                preserved_names = ", ".join(
+                    task_identity(task) for task in deletion.preserved_tasks
+                )
+                st.info(
+                    "These subtasks have recorded time and will be preserved as "
+                    f"standalone tasks: {preserved_names}"
+                )
+            if deletion.deleted_tasks:
+                deleted_names = ", ".join(
+                    task_identity(task) for task in deletion.deleted_tasks
+                )
+                st.warning(
+                    "These subtasks have no recorded time and will be deleted: "
+                    f"{deleted_names}"
+                )
+            confirm_delete, cancel_delete = st.columns(2)
+            if confirm_delete.button(
+                "Confirm deletion",
+                key=f"confirm_delete_{selected_task.id}",
+                use_container_width=True,
+            ):
+                task_service.delete_task(selected_task.id, confirmed=True)
+                st.session_state.pending_delete_task_id = None
                 close_task()
                 st.rerun()
+            if cancel_delete.button(
+                "Cancel",
+                key=f"cancel_delete_{selected_task.id}",
+                use_container_width=True,
+            ):
+                st.session_state.pending_delete_task_id = None
+                st.rerun()
+
+        st.subheader("Recorded time")
+        st.caption(
+            "Recorded time is separate from the estimate. Each entry is limited "
+            "to 12 hours, and all entries for one day cannot exceed 24 hours."
+        )
+        with st.form(f"add_time_entry_{selected_task.id}"):
+            entry_date = st.date_input(
+                "Work date",
+                value=date.today(),
+                format="MM-DD-YYYY",
+                key=f"time_date_{selected_task.id}",
+            )
+            entry_minutes = st.number_input(
+                "Duration in minutes",
+                min_value=1,
+                max_value=MAX_ENTRY_MINUTES,
+                value=30,
+                step=1,
+                key=f"time_minutes_{selected_task.id}",
+            )
+            entry_note = st.text_area(
+                "Time-entry note",
+                max_chars=TIME_ENTRY_NOTE_MAX_LENGTH,
+                key=f"time_note_{selected_task.id}",
+            )
+            if st.form_submit_button("Add time entry"):
+                try:
+                    time_entry_service.create(
+                        selected_task.id,
+                        work_date=entry_date,
+                        minutes=int(entry_minutes),
+                        note=entry_note,
+                    )
+                    st.success("Time entry added.")
+                    st.rerun()
+                except TimeEntryValidationError as exc:
+                    st.error(str(exc))
+
+        task_time_entries = time_entry_service.list_for_task(selected_task.id)
+        if task_time_entries:
+            for entry in task_time_entries:
+                with st.expander(
+                    f"{format_date(entry.work_date)} · {format_minutes(entry.minutes)}"
+                ):
+                    with st.form(f"edit_time_entry_{entry.id}"):
+                        edited_date = st.date_input(
+                            "Work date",
+                            value=entry.work_date,
+                            format="MM-DD-YYYY",
+                        )
+                        edited_minutes = st.number_input(
+                            "Duration in minutes",
+                            min_value=1,
+                            max_value=MAX_ENTRY_MINUTES,
+                            value=entry.minutes,
+                            step=1,
+                        )
+                        edited_note = st.text_area(
+                            "Time-entry note",
+                            value=entry.note,
+                            max_chars=TIME_ENTRY_NOTE_MAX_LENGTH,
+                        )
+                        update_entry, delete_entry = st.columns(2)
+                        if update_entry.form_submit_button(
+                            "Update entry", use_container_width=True
+                        ):
+                            try:
+                                time_entry_service.update(
+                                    entry.id,
+                                    work_date=edited_date,
+                                    minutes=int(edited_minutes),
+                                    note=edited_note,
+                                )
+                                st.success("Time entry updated.")
+                                st.rerun()
+                            except TimeEntryValidationError as exc:
+                                st.error(str(exc))
+                        if delete_entry.form_submit_button(
+                            "Delete entry", use_container_width=True
+                        ):
+                            time_entry_service.delete(entry.id)
+                            st.rerun()
+        else:
+            st.caption("No recorded time for this task.")
+
+        st.subheader("Hierarchy")
+        descendants = tasks.descendant_ids(selected_task.id)
+        parent_candidates = [
+            task
+            for task in tasks.list_all(include_completed=True)
+            if task.id != selected_task.id and task.id not in descendants
+        ]
+        parent_labels = {None: "No parent (standard task)"}
+        parent_labels.update(
+            {task.id: f"{task.title} (task {task.id})" for task in parent_candidates}
+        )
+        parent_options = list(parent_labels)
+        current_parent = selected_task.parent_task_id
+        parent_index = (
+            parent_options.index(current_parent)
+            if current_parent in parent_options
+            else 0
+        )
+        with st.form(f"parent_{selected_task.id}"):
+            chosen_parent = st.selectbox(
+                "Parent task",
+                parent_options,
+                index=parent_index,
+                format_func=parent_labels.get,
+            )
+            if st.form_submit_button("Update parent"):
+                try:
+                    if chosen_parent is None and current_parent is not None:
+                        task_service.remove_subtask(selected_task.id)
+                    elif chosen_parent is not None and chosen_parent != current_parent:
+                        task_service.reassign_subtask(
+                            selected_task.id,
+                            chosen_parent,
+                        )
+                    st.success("Task hierarchy updated.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+
+        st.subheader("Dependencies")
+        st.caption(
+            "Direction: this task requires its prerequisites. Blocking is "
+            "calculated from incomplete prerequisites."
+        )
+        prerequisite_tasks = task_service.prerequisites(selected_task.id)
+        dependent_tasks = task_service.dependents(selected_task.id)
+
+        st.markdown("**Prerequisites this task requires**")
+        if prerequisite_tasks:
+            for prerequisite in prerequisite_tasks:
+                prerequisite_label, remove_prerequisite = st.columns([4, 1])
+                prerequisite_label.write(task_identity(prerequisite))
+                if remove_prerequisite.button(
+                    "Remove",
+                    key=(
+                        f"remove_dependency_{selected_task.id}_"
+                        f"{prerequisite.id}"
+                    ),
+                    use_container_width=True,
+                ):
+                    task_service.remove_dependency(
+                        selected_task.id,
+                        prerequisite.id,
+                    )
+                    st.rerun()
+        else:
+            st.caption("No prerequisites.")
+
+        st.markdown("**Tasks that depend on this task**")
+        if dependent_tasks:
+            for dependent in dependent_tasks:
+                dependent_label, remove_dependent = st.columns([4, 1])
+                dependent_label.write(task_identity(dependent))
+                if remove_dependent.button(
+                    "Remove",
+                    key=f"remove_dependent_{dependent.id}_{selected_task.id}",
+                    use_container_width=True,
+                ):
+                    task_service.remove_dependency(
+                        dependent.id,
+                        selected_task.id,
+                    )
+                    st.rerun()
+        else:
+            st.caption("No dependent tasks.")
+
+        dependency_candidates = [
+            task
+            for task in tasks.list_all(include_completed=True)
+            if task.id != selected_task.id
+        ]
+        if dependency_candidates:
+            candidate_labels = {
+                task.id: task_identity(task) for task in dependency_candidates
+            }
+            with st.form(f"add_dependency_{selected_task.id}"):
+                prerequisite_id = st.selectbox(
+                    "Add prerequisite",
+                    list(candidate_labels),
+                    format_func=candidate_labels.get,
+                )
+                if st.form_submit_button("Add dependency"):
+                    try:
+                        offer = task_service.add_dependency(
+                            selected_task.id,
+                            prerequisite_id,
+                        )
+                        if offer is not None:
+                            st.session_state.pending_dependency_offer = offer
+                        st.success("Dependency added.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+        else:
+            st.caption("Create another task before adding a dependency.")
+
+        pending_offer: DependencyOffer | None = (
+            st.session_state.pending_dependency_offer
+        )
+        if (
+            pending_offer is not None
+            and pending_offer.dependent_task_id == selected_task.id
+        ):
+            if pending_offer.kind == "create_epic":
+                st.info(
+                    "These are standalone tasks. You may create an epic with "
+                    "the prerequisite first and the dependent second. The "
+                    "dependency will remain in place."
+                )
+                name_choice = st.radio(
+                    "Epic name",
+                    ["Use suggested name", "Enter another name"],
+                    key=f"epic_name_choice_{selected_task.id}",
+                    horizontal=True,
+                )
+                custom_name = st.text_input(
+                    "New epic name",
+                    max_chars=TITLE_MAX_LENGTH,
+                    disabled=name_choice == "Use suggested name",
+                    key=f"custom_epic_name_{selected_task.id}",
+                )
+                st.caption(
+                    f"Suggested name: {pending_offer.suggested_epic_name}"
+                )
+                accept_offer, decline_offer = st.columns(2)
+                if accept_offer.button(
+                    "Create epic",
+                    key=f"accept_epic_offer_{selected_task.id}",
+                    use_container_width=True,
+                ):
+                    chosen_name = (
+                        pending_offer.suggested_epic_name
+                        if name_choice == "Use suggested name"
+                        else custom_name
+                    )
+                    try:
+                        epic = task_service.convert_dependency_pair_to_epic(
+                            pending_offer.dependent_task_id,
+                            pending_offer.prerequisite_task_id,
+                            chosen_name or "",
+                        )
+                        st.session_state.pending_dependency_offer = None
+                        open_task(epic.id)
+                        st.rerun()
+                    except (TaskValidationError, ValueError) as exc:
+                        st.error(str(exc))
+                if decline_offer.button(
+                    "Keep dependency only",
+                    key=f"decline_epic_offer_{selected_task.id}",
+                    use_container_width=True,
+                ):
+                    st.session_state.pending_dependency_offer = None
+                    st.rerun()
+            elif pending_offer.kind == "append_to_epic":
+                epic = tasks.get(pending_offer.prerequisite_task_id)
+                st.info(
+                    f"You may add this task as the final subtask of "
+                    f"{task_identity(epic)}. Its direct dependency on the epic "
+                    "will be removed to avoid a completion deadlock."
+                )
+                accept_append, decline_append = st.columns(2)
+                if accept_append.button(
+                    "Add as final subtask",
+                    key=f"accept_append_offer_{selected_task.id}",
+                    use_container_width=True,
+                ):
+                    task_service.append_dependent_to_epic(
+                        pending_offer.dependent_task_id,
+                        pending_offer.prerequisite_task_id,
+                    )
+                    st.session_state.pending_dependency_offer = None
+                    st.rerun()
+                if decline_append.button(
+                    "Keep dependency only",
+                    key=f"decline_append_offer_{selected_task.id}",
+                    use_container_width=True,
+                ):
+                    st.session_state.pending_dependency_offer = None
+                    st.rerun()
+
+        with st.expander("Add subtask", expanded=False):
+            with st.form(f"add_subtask_{selected_task.id}"):
+                subtask_title = st.text_input(
+                    "Subtask title",
+                    max_chars=TITLE_MAX_LENGTH,
+                )
+                subtask_description = st.text_area(
+                    "Subtask description",
+                    max_chars=DESCRIPTION_MAX_LENGTH,
+                )
+                subtask_priority = st.selectbox(
+                    "Subtask priority",
+                    ["High", "Medium", "Low"],
+                    index=["High", "Medium", "Low"].index(
+                        selected_task.priority
+                    ),
+                )
+                use_subtask_due = st.checkbox("Set subtask due date")
+                subtask_due = st.date_input(
+                    "Subtask due date",
+                    value=selected_task.due_date or date.today(),
+                    format="MM-DD-YYYY",
+                    disabled=not use_subtask_due,
+                )
+                use_subtask_estimate = st.checkbox(
+                    "Set subtask estimated duration"
+                )
+                subtask_estimate = st.number_input(
+                    "Subtask estimated hours",
+                    min_value=0.25,
+                    max_value=float(STANDARD_ESTIMATE_MAX_HOURS),
+                    value=0.25,
+                    step=0.25,
+                    disabled=not use_subtask_estimate,
+                )
+                subtask_done = st.text_area(
+                    "Subtask definition of done",
+                    max_chars=DESCRIPTION_MAX_LENGTH,
+                )
+                if st.form_submit_button("Add subtask"):
+                    try:
+                        task_service.add_subtask(
+                            selected_task.id,
+                            title=subtask_title.strip(),
+                            description=subtask_description,
+                            priority=subtask_priority,
+                            due_date=subtask_due if use_subtask_due else None,
+                            estimated_hours=(
+                                subtask_estimate
+                                if use_subtask_estimate
+                                else None
+                            ),
+                            completion_criterion=subtask_done,
+                        )
+                        st.success("Subtask added.")
+                        st.rerun()
+                    except TaskValidationError as exc:
+                        st.error(str(exc))
+
+        if children:
+            st.subheader("Subtasks")
+            for index, child in enumerate(children):
+                task_card(
+                    child,
+                    on_open=open_task,
+                    key_prefix=f"subtask_{selected_task.id}",
+                )
+                move_up, move_down, remove = st.columns(3)
+                if move_up.button(
+                    "Move up",
+                    key=f"move_up_{child.id}",
+                    disabled=index == 0,
+                    use_container_width=True,
+                ):
+                    task_service.move_subtask(child.id, -1)
+                    st.rerun()
+                if move_down.button(
+                    "Move down",
+                    key=f"move_down_{child.id}",
+                    disabled=index == len(children) - 1,
+                    use_container_width=True,
+                ):
+                    task_service.move_subtask(child.id, 1)
+                    st.rerun()
+                if remove.button(
+                    "Remove from epic",
+                    key=f"remove_subtask_{child.id}",
+                    use_container_width=True,
+                ):
+                    task_service.remove_subtask(child.id)
+                    st.rerun()
     else:
         page_header("Tasks", "Create and maintain locally stored work items.")
         with st.expander("Create task", expanded=False):
             with st.form("create_task"):
-                title = st.text_input("Title")
-                description = st.text_area("Description")
+                title = st.text_input("Title", max_chars=TITLE_MAX_LENGTH)
+                description = st.text_area(
+                    "Description",
+                    max_chars=DESCRIPTION_MAX_LENGTH,
+                )
                 priority = st.selectbox("Priority", ["High", "Medium", "Low"], index=1)
                 use_due = st.checkbox("Set due date")
                 due_date = st.date_input("Due date", value=date.today(), format="MM-DD-YYYY", disabled=not use_due)
+                use_estimate = st.checkbox("Set estimated duration")
+                estimated_hours = st.number_input(
+                    "Estimated hours",
+                    min_value=0.25,
+                    max_value=float(STANDARD_ESTIMATE_MAX_HOURS),
+                    value=0.25,
+                    step=0.25,
+                    disabled=not use_estimate,
+                )
                 status = st.selectbox("Status", ["Open", "In Progress", "Blocked", "Completed"])
                 source = st.text_input("Source or provenance", value="User")
                 notes = st.text_area("Notes")
+                completion_criterion = st.text_area(
+                    "Definition of done",
+                    max_chars=DESCRIPTION_MAX_LENGTH,
+                )
                 if st.form_submit_button("Create task"):
-                    if not title.strip():
-                        st.error("Title is required.")
-                    else:
+                    try:
                         task_service.create_task(title=title.strip(), description=description, priority=priority,
-                            due_date=due_date if use_due else None, status=status, source=source or "User", notes=notes)
+                            due_date=due_date if use_due else None, status=status, source=source or "User", notes=notes,
+                            estimated_hours=estimated_hours if use_estimate else None,
+                            completion_criterion=completion_criterion)
                         st.success("Task created.")
                         st.rerun()
+                    except TaskValidationError as exc:
+                        st.error(str(exc))
 
         show_completed = st.checkbox("Show completed", value=False)
-        current_tasks = tasks.list_all(show_completed)
+        current_tasks = tasks.list_roots(show_completed)
         if not current_tasks:
             st.info("No tasks to show.")
         for task in current_tasks:
-            task_card(task, on_open=open_task, key_prefix="all")
+            render_task_hierarchy(task)
 
 elif page == "Daily Journal":
     page_header("Daily Journal", "Record progress, blockers, and reflection without scoring productivity.")
@@ -509,7 +1208,7 @@ elif page == "Ethical AI":
         "Data minimization": "Only user-selected, limited fields are sent to the local model.",
         "Human oversight": "AI-originated writes require a visible proposal and explicit confirmation.",
         "User-controlled memory": "Persistent memory is off by default and can be inspected, edited, or deleted.",
-        "No surveillance": "No productivity scoring, time tracking, keystroke monitoring, or peer ranking exists.",
+        "No surveillance": "No productivity scoring, automatic time tracking, keystroke monitoring, or peer ranking exists. Recorded time is entered manually by the user.",
     }
     for title, text in principles.items():
         st.markdown(f"**{title}:** {text}")

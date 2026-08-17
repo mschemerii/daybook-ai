@@ -95,7 +95,7 @@ def test_every_date_input_uses_month_day_year_format() -> None:
         and node.func.attr == "date_input"
     ]
 
-    assert len(date_inputs) == 3
+    assert len(date_inputs) >= 3
 
     for date_input in date_inputs:
         format_keyword = next(

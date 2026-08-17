@@ -21,6 +21,12 @@ STATUS_META = {
 }
 
 
+def format_estimated_hours(value: float | None) -> str:
+    if value is None:
+        return "Not estimated"
+    return f"{value:g} hours"
+
+
 def page_header(title: str, subtitle: str = "") -> None:
     st.title(title)
     if subtitle:
@@ -33,11 +39,13 @@ def task_card(
     on_open=None,
     key_prefix: str = "task",
     on_reopen=None,
+    blocking_prerequisites=None,
 ) -> None:
     """Render an accessible task card with optional task actions.
 
     ``on_open`` receives the task ID when the Open task button is selected.
     ``on_reopen`` receives the task ID when the Reopen button is selected.
+    ``blocking_prerequisites`` names dependency-derived blockers.
     """
     priority_icon, priority_class = PRIORITY_META.get(
         task.priority,
@@ -49,6 +57,12 @@ def task_card(
     )
 
     due_text = format_date(task.due_date)
+    task_type = "Epic" if task.task_type == "epic" else "Task"
+    hierarchy_label = (
+        f"Subtask {task.subtask_order + 1}"
+        if task.parent_task_id is not None and task.subtask_order is not None
+        else task_type
+    )
 
     with st.container(
         border=True,
@@ -70,6 +84,12 @@ def task_card(
                 </span>
                 <span class="task-badge due-badge">
                     Due: {escape(due_text)}
+                </span>
+                <span class="task-badge due-badge">
+                    Type: {escape(hierarchy_label)}
+                </span>
+                <span class="task-badge due-badge">
+                    Estimate: {escape(format_estimated_hours(task.estimated_hours))}
                 </span>
             </div>
             """,
@@ -101,6 +121,13 @@ def task_card(
                 unsafe_allow_html=True,
             )
 
+        if blocking_prerequisites:
+            blocker_names = ", ".join(
+                f"{prerequisite.title} (task {prerequisite.id})"
+                for prerequisite in blocking_prerequisites
+            )
+            st.warning(f"Blocked by incomplete prerequisites: {blocker_names}")
+
         actions = []
 
         if on_open is not None:
@@ -131,6 +158,7 @@ def task_card(
                     key=f"{key_prefix}_reopen_{task.id}",
                     use_container_width=True,
                 ):
-                    on_reopen(task.id)
-                    st.success("Task reopened.")
+                    reopened = on_reopen(task.id)
+                    if reopened is not False:
+                        st.success("Task reopened.")
                     st.rerun()
