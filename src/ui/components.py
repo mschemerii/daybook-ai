@@ -20,11 +20,24 @@ STATUS_META = {
     "Completed": ("✓", "status-completed"),
 }
 
+PROVENANCE_LABELS = {
+    "ai_generated": "Created from an AI proposal approved by you",
+    "ai_generated_user_edited": "Created from an AI proposal you edited and approved",
+    "user_added_during_review": "Added by you during AI proposal review",
+}
+
 
 def format_estimated_hours(value: float | None) -> str:
     if value is None:
         return "Not estimated"
     return f"{value:g} hours"
+
+
+def meaningful_task_origin(task) -> str | None:
+    """Describe only origins that add useful context for the user."""
+    if task.source == "Sample data":
+        return "Included sample data"
+    return PROVENANCE_LABELS.get(task.provenance)
 
 
 def page_header(title: str, subtitle: str = "") -> None:
@@ -103,10 +116,11 @@ def task_card(
                 unsafe_allow_html=True,
             )
 
-        if task.source:
+        task_origin = meaningful_task_origin(task)
+        if task_origin:
             st.markdown(
                 f'<p class="task-card-source">'
-                f'Source: {escape(str(task.source))}</p>',
+                f'Origin: {escape(task_origin)}</p>',
                 unsafe_allow_html=True,
             )
 
