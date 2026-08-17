@@ -55,20 +55,6 @@ CONTROLLER_URL = os.getenv("DAYBOOK_CONTROLLER_URL", "http://127.0.0.1:8500")
 CONTROLLER_TOKEN = os.getenv("DAYBOOK_CONTROLLER_TOKEN", "")
 PAGES = ["Today", "Tasks", "Daily Journal", "Assistant", "About", "Ethical AI"]
 
-PROVENANCE_LABELS = {
-    "user_created": "Created manually",
-    "ai_generated": "AI-proposed and user-approved",
-    "ai_generated_user_edited": "AI-proposed, user-edited, and user-approved",
-    "user_added_during_review": "Added manually during AI proposal review",
-}
-
-
-def task_origin_label(task) -> str:
-    """Return a user-facing, application-controlled task origin label."""
-    if task.source == "Sample data":
-        return "Included sample data"
-    return PROVENANCE_LABELS.get(task.provenance, "Recorded by Daybook AI")
-
 
 @st.cache_resource
 def services():
@@ -143,6 +129,9 @@ if "breakdown_error" not in st.session_state:
 
 if "breakdown_approval_result" not in st.session_state:
     st.session_state.breakdown_approval_result = None
+
+if "task_flash_message" not in st.session_state:
+    st.session_state.task_flash_message = None
 
 pending_page = st.session_state.pending_page
 
@@ -918,6 +907,9 @@ elif page == "Tasks":
 
     if selected_task:
         page_header("Task details", "Review or update the selected task.")
+        task_flash_message = st.session_state.pop("task_flash_message", None)
+        if task_flash_message:
+            st.success(task_flash_message)
         if st.button("← Back to all tasks"):
             close_task()
             st.rerun()
@@ -1036,12 +1028,6 @@ elif page == "Tasks":
                 status_options,
                 index=status_options.index(selected_task.status),
                 disabled=selected_task.status == "Completed",
-            )
-            st.text_input(
-                "Task origin",
-                value=task_origin_label(selected_task),
-                disabled=True,
-                help="Recorded automatically; task origin cannot be edited manually.",
             )
             notes = st.text_area("Notes", selected_task.notes)
             completion_criterion = st.text_area(
@@ -1540,7 +1526,6 @@ elif page == "Tasks":
                     help="Leave blank when the task has not been estimated.",
                 )
                 status = st.selectbox("Status", ["Open", "In Progress", "Blocked", "Completed"])
-                st.caption("Task origin: Created manually (recorded automatically).")
                 notes = st.text_area("Notes")
                 completion_criterion = st.text_area(
                     "Definition of done",
@@ -1548,11 +1533,12 @@ elif page == "Tasks":
                 )
                 if st.form_submit_button("Create task"):
                     try:
-                        task_service.create_task(title=title.strip(), description=description, priority=priority,
+                        created_task = task_service.create_task(title=title.strip(), description=description, priority=priority,
                             due_date=due_date if use_due else None, status=status, source="User", notes=notes,
                             estimated_hours=estimated_hours,
                             completion_criterion=completion_criterion)
-                        st.success("Task created.")
+                        st.session_state.task_flash_message = "Task created successfully."
+                        open_task(created_task.id)
                         st.rerun()
                     except TaskValidationError as exc:
                         st.error(str(exc))
