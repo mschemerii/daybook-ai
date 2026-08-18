@@ -921,6 +921,21 @@ class PlanningService:
         raw_subtasks = value["subtasks"]
         if not isinstance(raw_subtasks, list) or not 2 <= len(raw_subtasks) <= 8:
             raise Phase6ValidationError("A proposal must contain between 2 and 8 subtasks.")
+        sequence_values = [
+            item.get("suggested_sequence") if isinstance(item, dict) else None
+            for item in raw_subtasks
+        ]
+        if (
+            all(
+                isinstance(sequence, int) and not isinstance(sequence, bool)
+                for sequence in sequence_values
+            )
+            and set(sequence_values) == set(range(len(raw_subtasks)))
+        ):
+            raw_subtasks = [
+                {**item, "suggested_sequence": item["suggested_sequence"] + 1}
+                for item in raw_subtasks
+            ]
 
         subtasks: list[ProposedSubtask] = []
         seen_keys: set[str] = set()
