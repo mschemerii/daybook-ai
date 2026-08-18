@@ -10,6 +10,7 @@ from src.utils.dates import format_date, format_datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_FILE = PROJECT_ROOT / "app.py"
+COMPONENTS_FILE = PROJECT_ROOT / "src" / "ui" / "components.py"
 
 BADGE_ACCENTS = (
     "#D55E00",
@@ -109,6 +110,15 @@ def test_every_date_input_uses_month_day_year_format() -> None:
         assert format_keyword is not None
         assert isinstance(format_keyword.value, ast.Constant)
         assert format_keyword.value.value == "MM-DD-YYYY"
+        assert all(keyword.arg != "disabled" for keyword in date_input.keywords)
+
+
+def test_optional_task_fields_do_not_use_nonresponsive_form_toggles() -> None:
+    app_source = APP_FILE.read_text(encoding="utf-8")
+
+    assert '"Set due date"' not in app_source
+    assert '"Set subtask due date"' not in app_source
+    assert '"Set subtask estimated duration"' not in app_source
 
 
 def test_task_metadata_has_one_accessible_mapping() -> None:
@@ -151,14 +161,61 @@ def test_task_card_css_includes_narrow_window_rules() -> None:
     assert "flex-basis:100%" in app_source
 
 
-def test_phase6_ui_is_deliberate_read_only_and_has_safe_fallbacks() -> None:
+def test_phase6_generation_and_phase7_review_have_explicit_boundaries() -> None:
     app_source = APP_FILE.read_text(encoding="utf-8")
 
     assert '"Explain with AI"' in app_source
     assert '"Request Breakdown"' in app_source
     assert '"Generate read-only proposal"' in app_source
-    assert "Validated proposal — read-only preview" in app_source
+    assert "Persisted human-review draft" in app_source
+    assert '"Approve and create epic tasks"' in app_source
+    assert '"Reject proposal"' in app_source
+    assert "Final deterministic approval summary" in app_source
+    assert "Verify approval result (no duplicates)" in app_source
     assert '"Cancel breakdown"' in app_source
     assert "Untrusted local AI explanation" in app_source
     assert "Deterministic fallback" in app_source
-    assert '"Approve proposal"' not in app_source
+
+def test_task_estimate_is_directly_optional_and_origin_is_application_controlled() -> None:
+    app_source = APP_FILE.read_text(encoding="utf-8")
+
+    assert '"Set estimated duration"' not in app_source
+    assert '"Source or provenance"' not in app_source
+    assert 'placeholder="Optional"' in app_source
+    assert '"estimated_hours": estimated_hours' in app_source
+    assert 'source="User"' in app_source
+    assert '"task_flash_message"' in app_source
+    assert 'open_task(created_task.id)' in app_source
+    assert '"Task origin"' not in app_source
+
+
+def test_epic_tasks_expose_full_task_navigation_and_ordered_disclosure() -> None:
+    app_source = APP_FILE.read_text(encoding="utf-8")
+    component_source = COMPONENTS_FILE.read_text(encoding="utf-8")
+
+    assert '"Tasks in this epic"' in app_source
+    assert "Next available task:" in app_source
+    assert "← Back to epic:" in app_source
+    assert "time_entry_service.recorded_minutes(child.id)" in app_source
+    assert "task_service.complete_task(child.id)" in app_source
+    assert "expanded=is_next" in app_source
+    assert '"Approved proposal audit"' in app_source
+    assert "Type: {escape(task_type)}" in component_source
+    assert "Epic position:" in component_source
+    assert "f\"Subtask {task.subtask_order + 1}\"" not in component_source
+
+
+def test_task_metadata_is_rendered_as_one_html_block() -> None:
+    component_source = COMPONENTS_FILE.read_text(encoding="utf-8")
+
+    assert "{\"\".join(badges)}" in component_source
+    assert "epic_position_badge" not in component_source
+
+
+def test_streamlit_toolbar_is_minimal() -> None:
+    config = (PROJECT_ROOT / ".streamlit" / "config.toml").read_text(
+        encoding="utf-8"
+    )
+
+    assert '[client]' in config
+    assert 'toolbarMode = "minimal"' in config

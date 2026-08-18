@@ -63,16 +63,10 @@ def test_create_open_edit_complete_and_reopen_task(
         exact=True,
     ).click()
 
-    task_card = card_for_title(
-        app_frame,
-        original_title,
-    )
-
-    task_card.get_by_role(
-        "button",
-        name="Open task",
+    app_frame.get_by_text(
+        "Task created successfully.",
         exact=True,
-    ).click()
+    ).wait_for(state="visible", timeout=15_000)
 
     app_frame.get_by_text(
         "Task details",
@@ -165,3 +159,69 @@ def test_open_task_from_today_page(app_frame: FrameLocator):
         state="visible",
         timeout=15_000,
     )
+
+
+@pytest.mark.ui
+def test_epic_child_supports_time_and_completion_workflow(
+    app_frame: FrameLocator,
+):
+    unique = uuid.uuid4().hex[:8]
+    epic_title = f"UI epic {unique}"
+    child_title = f"UI epic task {unique}"
+
+    navigate(app_frame, "Tasks")
+    create_expander = app_frame.locator(
+        '[data-testid="stExpander"]'
+    ).filter(has_text="Create task").first
+    create_expander.locator("summary").click()
+    app_frame.get_by_label("Title", exact=True).fill(epic_title)
+    app_frame.get_by_role(
+        "button", name="Create task", exact=True
+    ).click()
+
+    add_task_expander = app_frame.locator(
+        '[data-testid="stExpander"]'
+    ).filter(has_text="Add first task and convert to epic").first
+    add_task_expander.locator("summary").click()
+    app_frame.get_by_label("Task title", exact=True).fill(child_title)
+    app_frame.get_by_role("button", name="Add task", exact=True).click()
+
+    app_frame.get_by_role(
+        "heading", name="Tasks in this epic", exact=True
+    ).wait_for(state="visible", timeout=15_000)
+    app_frame.get_by_text(
+        f"Next available task: {child_title}", exact=True
+    ).wait_for(state="visible", timeout=15_000)
+    app_frame.get_by_role(
+        "button", name="Open task", exact=True
+    ).click()
+
+    app_frame.get_by_role(
+        "button",
+        name=re.compile(r"Back to epic:"),
+    ).wait_for(state="visible", timeout=15_000)
+    app_frame.get_by_role(
+        "heading", name="Recorded time", exact=True
+    ).wait_for(state="visible", timeout=15_000)
+    app_frame.get_by_label(
+        "Time-entry note", exact=True
+    ).fill("Worked through the epic task.")
+    app_frame.get_by_role(
+        "button", name="Add time entry", exact=True
+    ).click()
+    app_frame.get_by_text("30m", exact=True).first.wait_for(
+        state="visible",
+        timeout=15_000,
+    )
+
+    app_frame.get_by_role(
+        "button", name="Mark complete", exact=True
+    ).click()
+    app_frame.get_by_role(
+        "button",
+        name=re.compile(r"Back to epic:"),
+    ).click()
+    app_frame.get_by_text(
+        f"1. {child_title} — Completed",
+        exact=True,
+    ).wait_for(state="visible", timeout=15_000)

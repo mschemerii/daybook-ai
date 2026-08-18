@@ -179,6 +179,93 @@ class ValidatedDecompositionProposal:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ReviewItem:
+    """Application-owned, proposal-local representation of a reviewed subtask."""
+
+    item_key: str
+    title: str
+    description: str
+    estimated_hours: float
+    priority: str
+    status: str
+    completion_criterion: str
+    due_date: date | None
+    prerequisite_item_keys: tuple[str, ...]
+    selected: bool
+    display_order: int
+    origin: str
+    original_content: dict[str, Any] | None = None
+
+    def content_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "description": self.description,
+            "estimated_hours": self.estimated_hours,
+            "priority": self.priority,
+            "status": self.status,
+            "completion_criterion": self.completion_criterion,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+        }
+
+    @property
+    def provenance(self) -> str:
+        if self.origin == "user":
+            return "user_added_during_review"
+        return (
+            "ai_generated"
+            if self.original_content == self.content_dict()
+            else "ai_generated_user_edited"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "item_key": self.item_key,
+            **self.content_dict(),
+            "prerequisite_item_keys": list(self.prerequisite_item_keys),
+            "selected": self.selected,
+            "display_order": self.display_order,
+            "origin": self.origin,
+            "original_content": self.original_content,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalReview:
+    proposal_id: str
+    parent_task_id: int
+    summary: str
+    status: str
+    items: tuple[ReviewItem, ...]
+    advisories: tuple[ProposalAdvisory, ...] = ()
+
+    @property
+    def selected_items(self) -> tuple[ReviewItem, ...]:
+        return tuple(
+            item
+            for item in sorted(self.items, key=lambda value: value.display_order)
+            if item.selected
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewValidation:
+    review: ProposalReview
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalResult:
+    proposal_id: str
+    parent_task_id: int
+    item_task_ids: tuple[tuple[str, int], ...]
+    repeated: bool = False
+
+    @property
+    def mapping(self) -> dict[str, int]:
+        return dict(self.item_task_ids)
+
+
 @dataclass(slots=True)
 class JournalEntry:
     entry_date: date

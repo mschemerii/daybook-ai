@@ -12,7 +12,8 @@ Designed and coded by **Michael Schemer** as an Ethical AI course prototype.
 - Epic/subtask hierarchy and deterministic task dependencies with lifecycle guards.
 - User-entered time entries kept separate from estimates, with per-entry and daily limits.
 - Governed deletion previews that preserve timed subtasks when an epic is deleted.
-- Deterministic decomposition classification, focused readiness clarification, and strictly validated read-only AI proposals.
+- Deterministic decomposition classification, focused readiness clarification, strictly validated AI drafts, and editable human review before approval.
+- Stable proposal-local review keys, application-verified provenance, atomic task creation, and durable duplicate protection.
 - Date-based daily journal and previous-entry review.
 - Local-model assistant with explicit task/journal access controls.
 - User-controlled memory, disabled by default.
@@ -249,6 +250,10 @@ pytest -q
 - The model cannot write to SQLite.
 - Task-decomposition output is strict JSON validated for identity, fields, lengths, estimates, dates, sequences, prerequisite references, cycles, advisories, and unsafe instructions.
 - Validated decomposition drafts may be stored without creating tasks, hierarchy links, dependencies, or time entries.
+- Draft items can be renamed, edited, inserted, removed, reordered, selected, deselected, and linked by stable proposal-local prerequisite keys. Final application validation is repeated after every human edit.
+- Unchanged model items remain `ai_generated`; edited model items become `ai_generated_user_edited`; restored original task content returns to `ai_generated`; manual review items are `user_added_during_review`. Selection and ordering do not alter provenance.
+- Explicit approval applies the reviewed structure in one SQLite transaction. Any failure rolls back tasks, hierarchy links, dependencies, proposal links, and proposal status.
+- Persisted proposal identity and `proposal_task_links` make repeated approval idempotent across reruns and new service sessions. Inconsistent approval records fail safely instead of recreating tasks.
 - AI-requested writes must use a proposal object and require application-side confirmation.
 - Persistent memory is off by default and is editable and deletable.
 - Audit history is local and deletable.
@@ -297,7 +302,7 @@ Browser opening can fail in remote shells, containers, or systems without a grap
 - Single-user local prototype; it has per-launch service tokens but no user-account system or encryption-at-rest layer.
 - Small local models may produce weak or invalid answers.
 - Unsupported or unavailable acceleration falls back to CPU and may be slower.
-- Phase 6 decomposition proposals are read-only. Editing, item selection, approval, provenance changes from review edits, and transactional task insertion are intentionally deferred to Phase 7.
+- Phase 7 review and approval are implemented only in the existing task-decomposition section. Phase 8 reporting/export and Phase 9-wide UI integration remain deferred.
 - No external information is available to the assistant.
 
 
@@ -363,7 +368,10 @@ Screenshots are written to `docs/screenshots/light/` and `docs/screenshots/dark/
 - [x] Deterministic focus ordering with visible rule explanations
 - [x] Typed ranking facts, deliberate grounded AI explanations, cache invalidation, and deterministic fallback
 - [x] Deterministic decomposition classification and readiness clarification
-- [x] Strict read-only decomposition proposals with bounded advisories and safe draft persistence
+- [x] Strict decomposition proposals with bounded advisories and safe draft persistence
+- [x] Editable human review with stable keys, selection, ordering, manual insertion, removal, and prerequisite editing
+- [x] Application-owned provenance transitions and final deterministic revalidation
+- [x] Explicit atomic approval with rollback and durable idempotent replay
 - [x] Local SQLite persistence and sample data
 - [x] Local llama.cpp model server with real inference verification
 - [x] Recommended `unsloth/Qwen3.5-0.8B-GGUF` model

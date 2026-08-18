@@ -20,11 +20,24 @@ STATUS_META = {
     "Completed": ("✓", "status-completed"),
 }
 
+PROVENANCE_LABELS = {
+    "ai_generated": "Created from an AI proposal approved by you",
+    "ai_generated_user_edited": "Created from an AI proposal you edited and approved",
+    "user_added_during_review": "Added by you during AI proposal review",
+}
+
 
 def format_estimated_hours(value: float | None) -> str:
     if value is None:
         return "Not estimated"
     return f"{value:g} hours"
+
+
+def meaningful_task_origin(task) -> str | None:
+    """Describe only origins that add useful context for the user."""
+    if task.source == "Sample data":
+        return "Included sample data"
+    return PROVENANCE_LABELS.get(task.provenance)
 
 
 def page_header(title: str, subtitle: str = "") -> None:
@@ -58,10 +71,22 @@ def task_card(
 
     due_text = format_date(task.due_date)
     task_type = "Epic" if task.task_type == "epic" else "Task"
-    hierarchy_label = (
-        f"Subtask {task.subtask_order + 1}"
-        if task.parent_task_id is not None and task.subtask_order is not None
-        else task_type
+    badges = [
+        f'<span class="task-badge {priority_class}">'
+        f'{priority_icon} Priority: {escape(str(task.priority))}</span>',
+        f'<span class="task-badge {status_class}">'
+        f'{status_icon} Status: {escape(str(task.status))}</span>',
+        f'<span class="task-badge due-badge">Due: {escape(due_text)}</span>',
+        f'<span class="task-badge due-badge">Type: {escape(task_type)}</span>',
+    ]
+    if task.parent_task_id is not None and task.subtask_order is not None:
+        badges.append(
+            '<span class="task-badge due-badge">'
+            f'Epic position: {task.subtask_order + 1}</span>'
+        )
+    badges.append(
+        '<span class="task-badge due-badge">'
+        f'Estimate: {escape(format_estimated_hours(task.estimated_hours))}</span>'
     )
 
     with st.container(
@@ -74,25 +99,7 @@ def task_card(
         )
 
         st.markdown(
-            f"""
-            <div class="task-meta">
-                <span class="task-badge {priority_class}">
-                    {priority_icon} Priority: {escape(str(task.priority))}
-                </span>
-                <span class="task-badge {status_class}">
-                    {status_icon} Status: {escape(str(task.status))}
-                </span>
-                <span class="task-badge due-badge">
-                    Due: {escape(due_text)}
-                </span>
-                <span class="task-badge due-badge">
-                    Type: {escape(hierarchy_label)}
-                </span>
-                <span class="task-badge due-badge">
-                    Estimate: {escape(format_estimated_hours(task.estimated_hours))}
-                </span>
-            </div>
-            """,
+            f'<div class="task-meta">{"".join(badges)}</div>',
             unsafe_allow_html=True,
         )
 
@@ -103,10 +110,11 @@ def task_card(
                 unsafe_allow_html=True,
             )
 
-        if task.source:
+        task_origin = meaningful_task_origin(task)
+        if task_origin:
             st.markdown(
                 f'<p class="task-card-source">'
-                f'Source: {escape(str(task.source))}</p>',
+                f'Origin: {escape(task_origin)}</p>',
                 unsafe_allow_html=True,
             )
 

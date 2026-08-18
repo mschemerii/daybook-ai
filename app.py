@@ -16,11 +16,13 @@ from src.repositories.dependency_repository import DependencyRepository
 from src.repositories.governance_repository import GovernanceRepository
 from src.repositories.journal_repository import JournalRepository
 from src.repositories.planning_repository import PlanningRepository
+from src.repositories.planning_repository import ApprovalIntegrityError
 from src.repositories.task_repository import TaskRepository
 from src.repositories.time_entry_repository import TimeEntryRepository
 from src.services.context_service import ContextService
 from src.services.planning_service import (
     Phase6ValidationError,
+    Phase7ValidationError,
     PlanningService,
 )
 from src.services.task_service import (
@@ -52,6 +54,7 @@ MODEL_API_KEY = os.getenv("DAYBOOK_MODEL_API_KEY", "")
 CONTROLLER_URL = os.getenv("DAYBOOK_CONTROLLER_URL", "http://127.0.0.1:8500")
 CONTROLLER_TOKEN = os.getenv("DAYBOOK_CONTROLLER_TOKEN", "")
 PAGES = ["Today", "Tasks", "Daily Journal", "Assistant", "About", "Ethical AI"]
+
 
 @st.cache_resource
 def services():
@@ -124,6 +127,12 @@ if "breakdown_result" not in st.session_state:
 if "breakdown_error" not in st.session_state:
     st.session_state.breakdown_error = ""
 
+if "breakdown_approval_result" not in st.session_state:
+    st.session_state.breakdown_approval_result = None
+
+if "task_flash_message" not in st.session_state:
+    st.session_state.task_flash_message = None
+
 pending_page = st.session_state.pending_page
 
 if pending_page is not None:
@@ -175,7 +184,7 @@ def format_minutes(minutes: int) -> str:
 
 
 def render_breakdown_planning(task) -> None:
-    """Render Phase 6 proposal generation without applying any task changes."""
+    """Render AI proposal generation and application-owned human review."""
     st.subheader("AI-assisted breakdown")
     classification = planning_service.classify(task)
     st.markdown(
@@ -273,52 +282,288 @@ def render_breakdown_planning(task) -> None:
     result = st.session_state.breakdown_result
     if result is not None and result.proposal.parent_task_id == task.id:
         proposal = result.proposal
-        st.markdown("**Validated proposal — read-only preview**")
+        review = planning_service.get_review(proposal.proposal_id)
+        st.markdown(
+            "**Persisted human-review draft**"
+            if review.status == "draft"
+            else "**Decomposition review**"
+        )
         st.caption(
             "Proposal wording is untrusted local-model output. Application validation "
-            "does not mean the proposal has been approved or applied."
+            "does not mean the proposal has been approved or applied. Every edit below "
+            "is revalidated by application code."
         )
         st.caption(
             f"Parent: {task_identity(task)} · Proposal: {proposal.proposal_id} · "
-            "Confirmation required"
+            f"Status: {review.status}"
         )
-        st.write(proposal.summary)
+        st.write(review.summary)
         if result.reused:
             st.caption("Reused the unchanged validated draft; the model was not called again.")
-        for warning in proposal.warnings:
-            st.warning(warning)
-        for item in proposal.subtasks:
-            with st.expander(
-                f"{item.suggested_sequence}. {item.title}",
-                expanded=True,
-            ):
-                st.write(item.description or "No description supplied.")
+
+        names = {item.item_key: item.title for item in review.items}
+        if review.status == "approved":
+            approval = st.session_state.breakdown_approval_result
+            if approval is None:
+                approval = planning_service.approve_review(proposal.proposal_id)
+            st.success(
+                f"Created {len(approval.item_task_ids)} tasks. "
+                "The original task is now an epic."
+            )
+            with st.expander("Approved proposal audit", expanded=False):
                 st.caption(
-                    f"Estimate: {item.estimated_hours:g} hours · "
-                    f"User priority: {item.priority} · "
-                    f"Due: {format_date(item.due_date)} · "
-                    f"Provenance: {item.provenance}"
+                    f"Parent: {task_identity(task)} · "
+                    f"Proposal: {proposal.proposal_id} · Status: approved"
                 )
-                st.markdown(f"**Definition of done:** {item.completion_criterion}")
-                if item.prerequisite_item_keys:
-                    st.markdown(
-                        "**Proposed prerequisites:** "
-                        + ", ".join(item.prerequisite_item_keys)
+                st.write(review.summary)
+                for order, item in enumerate(review.selected_items, start=1):
+                    prerequisites = ", ".join(
+                        names.get(key, key)
+                        for key in item.prerequisite_item_keys
+                    ) or "None"
+                    st.write(
+                        f"{order}. {item.title} — {item.estimated_hours:g}h — "
+                        f"prerequisites: {prerequisites}"
                     )
-        if proposal.advisories:
+                if review.advisories:
+                    st.markdown("**Suggestions recorded with the proposal**")
+                    for advisory in review.advisories:
+                        st.info(
+                            f"{advisory.kind.replace('_', ' ').title()}: "
+                            f"{advisory.message}"
+                        )
+                st.caption(
+                    ", ".join(
+                        f"{key} → task {task_id}"
+                        for key, task_id in approval.item_task_ids
+                    )
+                )
+                if st.button(
+                    "Verify approval result (no duplicates)",
+                    key=f"repeat_approval_{proposal.proposal_id}",
+                ):
+                    st.session_state.breakdown_approval_result = (
+                        planning_service.approve_review(proposal.proposal_id)
+                    )
+                    st.rerun()
+            return
+
+        if review.status != "draft":
+            with st.expander(
+                f"Proposal audit — {review.status}",
+                expanded=False,
+            ):
+                st.caption(
+                    f"Parent: {task_identity(task)} · "
+                    f"Proposal: {proposal.proposal_id}"
+                )
+                st.write(review.summary)
+                st.info(
+                    f"This proposal was {review.status}. No task structure was "
+                    "created, and it is no longer editable."
+                )
+            return
+
+        validation = None
+        try:
+            validation = planning_service.validate_review(proposal.proposal_id)
+        except Phase7ValidationError as exc:
+            st.error(f"Approval blocked: {exc}")
+        else:
+            for warning in validation.warnings:
+                st.warning(warning)
+
+        for item in review.items:
+            with st.expander(
+                f"{item.display_order}. {item.title} — {item.provenance}",
+                expanded=item.display_order == 1,
+            ):
+                with st.form(
+                    f"review_item_{proposal.proposal_id}_{item.item_key}"
+                ):
+                    selected = st.checkbox(
+                        "Include in final structure",
+                        value=item.selected,
+                        key=f"selected_{proposal.proposal_id}_{item.item_key}",
+                    )
+                    title = st.text_input(
+                        "Title", item.title,
+                        max_chars=TITLE_MAX_LENGTH,
+                        key=f"title_{proposal.proposal_id}_{item.item_key}",
+                    )
+                    description = st.text_area(
+                        "Description", item.description,
+                        max_chars=DESCRIPTION_MAX_LENGTH,
+                        key=f"description_{proposal.proposal_id}_{item.item_key}",
+                    )
+                    completion = st.text_area(
+                        "Definition of done", item.completion_criterion,
+                        max_chars=DESCRIPTION_MAX_LENGTH,
+                        key=f"completion_{proposal.proposal_id}_{item.item_key}",
+                    )
+                    estimate = st.number_input(
+                        "Estimated hours", min_value=0.25,
+                        max_value=float(STANDARD_ESTIMATE_MAX_HOURS), step=0.25,
+                        value=float(item.estimated_hours),
+                        key=f"estimate_{proposal.proposal_id}_{item.item_key}",
+                    )
+                    priority = st.selectbox(
+                        "Priority", ["High", "Medium", "Low"],
+                        index=["High", "Medium", "Low"].index(item.priority),
+                        key=f"priority_{proposal.proposal_id}_{item.item_key}",
+                    )
+                    status = st.selectbox(
+                        "Status", ["Open", "In Progress", "Blocked", "Completed"],
+                        index=["Open", "In Progress", "Blocked", "Completed"].index(item.status),
+                        key=f"status_{proposal.proposal_id}_{item.item_key}",
+                    )
+                    due = st.date_input(
+                        "Due date (optional)", value=item.due_date,
+                        format="MM-DD-YYYY",
+                        key=f"due_{proposal.proposal_id}_{item.item_key}",
+                    )
+                    prerequisite_options = list(
+                        dict.fromkeys(
+                            [key for key in names if key != item.item_key]
+                            + list(item.prerequisite_item_keys)
+                        )
+                    )
+                    prerequisite_keys = st.multiselect(
+                        "Prerequisites",
+                        prerequisite_options,
+                        default=list(item.prerequisite_item_keys),
+                        format_func=lambda key: f"{names.get(key, key)} [{key}]",
+                        key=f"prerequisites_{proposal.proposal_id}_{item.item_key}",
+                    )
+                    if st.form_submit_button("Save item"):
+                        try:
+                            planning_service.update_review_item(
+                                proposal.proposal_id,
+                                item.item_key,
+                                {
+                                    "title": title,
+                                    "description": description,
+                                    "completion_criterion": completion,
+                                    "estimated_hours": estimate,
+                                    "priority": priority,
+                                    "status": status,
+                                    "due_date": due,
+                                },
+                            )
+                            planning_service.set_review_item_selected(
+                                proposal.proposal_id, item.item_key, selected
+                            )
+                            planning_service.set_review_prerequisites(
+                                proposal.proposal_id, item.item_key, prerequisite_keys
+                            )
+                            st.rerun()
+                        except (Phase7ValidationError, ValueError) as exc:
+                            st.error(str(exc))
+                left, up, down, right = st.columns(4)
+                if left.button(
+                    "Remove", key=f"remove_{proposal.proposal_id}_{item.item_key}"
+                ):
+                    planning_service.remove_review_item(
+                        proposal.proposal_id, item.item_key
+                    )
+                    st.rerun()
+                if up.button(
+                    "Move up", key=f"up_{proposal.proposal_id}_{item.item_key}"
+                ):
+                    planning_service.move_review_item(
+                        proposal.proposal_id, item.item_key, -1
+                    )
+                    st.rerun()
+                if down.button(
+                    "Move down", key=f"down_{proposal.proposal_id}_{item.item_key}"
+                ):
+                    planning_service.move_review_item(
+                        proposal.proposal_id, item.item_key, 1
+                    )
+                    st.rerun()
+                right.caption(f"Stable key: {item.item_key}")
+
+        with st.form(f"manual_review_item_{proposal.proposal_id}"):
+            st.markdown("**Insert a task into this epic proposal**")
+            manual_title = st.text_input(
+                "Manual task title", max_chars=TITLE_MAX_LENGTH,
+                key=f"manual_title_{proposal.proposal_id}",
+            )
+            manual_description = st.text_area(
+                "Manual task description", max_chars=DESCRIPTION_MAX_LENGTH,
+                key=f"manual_description_{proposal.proposal_id}",
+            )
+            manual_completion = st.text_area(
+                "Manual definition of done", max_chars=DESCRIPTION_MAX_LENGTH,
+                key=f"manual_completion_{proposal.proposal_id}",
+            )
+            manual_estimate = st.number_input(
+                "Manual estimate", min_value=0.25,
+                max_value=float(STANDARD_ESTIMATE_MAX_HOURS), step=0.25,
+                value=0.25, key=f"manual_estimate_{proposal.proposal_id}",
+            )
+            if st.form_submit_button("Insert task"):
+                try:
+                    planning_service.add_review_item(
+                        proposal.proposal_id,
+                        title=manual_title,
+                        description=manual_description,
+                        completion_criterion=manual_completion,
+                        estimated_hours=manual_estimate,
+                    )
+                    st.rerun()
+                except Phase7ValidationError as exc:
+                    st.error(str(exc))
+
+        if review.advisories:
             st.markdown("**Suggestions**")
-            for advisory in proposal.advisories:
+            for advisory in review.advisories:
                 st.info(f"{advisory.kind.replace('_', ' ').title()}: {advisory.message}")
 
-    if st.button("Cancel breakdown", key=f"cancel_breakdown_{task.id}"):
-        result = st.session_state.breakdown_result
-        if result is not None:
-            planning.set_status(result.proposal.proposal_id, "cancelled")
+        selected = review.selected_items
+        st.markdown("**Final deterministic approval summary**")
+        for order, item in enumerate(selected, start=1):
+            prerequisites = ", ".join(
+                names.get(key, key) for key in item.prerequisite_item_keys
+            ) or "None"
+            st.write(
+                f"{order}. {item.title} — {item.estimated_hours:g}h — "
+                f"{format_date(item.due_date)} — {item.provenance} — "
+                f"prerequisites: {prerequisites}"
+            )
+
+        approve_col, reject_col, cancel_col = st.columns(3)
+        if approve_col.button(
+            "Approve and create epic tasks",
+            type="primary",
+            disabled=validation is None,
+            key=f"approve_{proposal.proposal_id}",
+        ):
+            try:
+                st.session_state.breakdown_approval_result = (
+                    planning_service.approve_review(proposal.proposal_id)
+                )
+                st.rerun()
+            except (Phase7ValidationError, ApprovalIntegrityError, ValueError, KeyError) as exc:
+                st.error(str(exc))
+        if reject_col.button(
+            "Reject proposal", key=f"reject_{proposal.proposal_id}"
+        ):
+            planning_service.reject_review(proposal.proposal_id)
+            st.rerun()
+        if cancel_col.button(
+            "Cancel breakdown", key=f"cancel_breakdown_{task.id}"
+        ):
+            planning_service.cancel_review(proposal.proposal_id)
+            st.rerun()
+    elif active and st.button(
+        "Cancel breakdown", key=f"cancel_uncreated_breakdown_{task.id}"
+    ):
         st.session_state.breakdown_task_id = None
         st.session_state.breakdown_answers = {}
         st.session_state.breakdown_result = None
         st.session_state.breakdown_error = ""
-        st.info("Breakdown cancelled. No task or structural records were created.")
+        st.session_state.breakdown_approval_result = None
         st.rerun()
 
 
@@ -332,7 +577,7 @@ def navigate_to(page_name: str) -> None:
 
 def render_task_hierarchy(task, *, depth: int = 0) -> None:
     if depth:
-        st.caption(f"{'↳ ' * depth}Subtask of the item above")
+        st.caption(f"{'↳ ' * depth}Task in the epic above")
     task_card(
         task,
         on_open=open_task,
@@ -341,6 +586,132 @@ def render_task_hierarchy(task, *, depth: int = 0) -> None:
     )
     for child in tasks.list_subtasks(task.id):
         render_task_hierarchy(child, depth=depth + 1)
+
+
+def render_epic_tasks(epic, children) -> None:
+    """Expose epic children as complete tasks in dependency-aware order."""
+    st.subheader("Tasks in this epic")
+    st.caption(
+        "Open any task to edit it, record time, manage dependencies, or review "
+        "its history. Completing a prerequisite makes its dependent tasks available."
+    )
+    if not children:
+        st.info("This epic does not contain any tasks.")
+        return
+
+    task_rows = []
+    for child in children:
+        blockers = task_service.blocking_prerequisites(child.id)
+        manually_blocked = child.status == "Blocked" and not blockers
+        available = (
+            child.status != "Completed"
+            and not blockers
+            and not manually_blocked
+        )
+        task_rows.append((child, blockers, manually_blocked, available))
+
+    next_available_id = next(
+        (
+            child.id
+            for child, _, _, available in task_rows
+            if available
+        ),
+        None,
+    )
+    if next_available_id is not None:
+        next_task = next(
+            child for child, _, _, _ in task_rows
+            if child.id == next_available_id
+        )
+        st.success(f"Next available task: {next_task.title}")
+    elif all(child.status == "Completed" for child in children):
+        st.success("Every task in this epic is complete.")
+    else:
+        st.info("No task is currently available. Review the blocked tasks below.")
+
+    for index, (child, blockers, manually_blocked, available) in enumerate(
+        task_rows
+    ):
+        is_next = child.id == next_available_id
+        if child.status == "Completed":
+            state = "Completed"
+        elif blockers:
+            blocker_names = ", ".join(blocker.title for blocker in blockers)
+            state = f"Waiting for {blocker_names}"
+        elif manually_blocked:
+            state = "Blocked"
+        elif is_next:
+            state = "Next available"
+        else:
+            state = "Available"
+
+        with st.expander(
+            f"{index + 1}. {child.title} — {state}",
+            expanded=is_next,
+        ):
+            if is_next:
+                st.info(
+                    "This is the first incomplete task without an unfinished "
+                    "prerequisite."
+                )
+            task_card(
+                child,
+                on_open=open_task,
+                on_reopen=reopen_task,
+                key_prefix=f"epic_task_{epic.id}",
+                blocking_prerequisites=blockers,
+            )
+            recorded = time_entry_service.recorded_minutes(child.id)
+            st.caption(
+                f"Recorded on this task: {format_minutes(recorded)}. "
+                "Open the task for time entries and full task controls."
+            )
+
+            nested_children = tasks.list_subtasks(child.id)
+            has_incomplete_children = any(
+                item.status != "Completed" for item in nested_children
+            )
+            complete, move_up, move_down, remove = st.columns(4)
+            if complete.button(
+                "Mark complete",
+                key=f"epic_complete_{child.id}",
+                disabled=(
+                    child.status == "Completed"
+                    or bool(blockers)
+                    or manually_blocked
+                    or has_incomplete_children
+                ),
+                use_container_width=True,
+            ):
+                try:
+                    task_service.complete_task(child.id)
+                    st.success("Task completed.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+            if move_up.button(
+                "Move up",
+                key=f"move_up_{child.id}",
+                disabled=index == 0,
+                use_container_width=True,
+            ):
+                task_service.move_subtask(child.id, -1)
+                st.rerun()
+            if move_down.button(
+                "Move down",
+                key=f"move_down_{child.id}",
+                disabled=index == len(children) - 1,
+                use_container_width=True,
+            ):
+                task_service.move_subtask(child.id, 1)
+                st.rerun()
+            if remove.button(
+                "Remove from epic",
+                key=f"remove_subtask_{child.id}",
+                use_container_width=True,
+            ):
+                task_service.remove_subtask(child.id)
+                st.rerun()
 
 
 st.markdown(
@@ -692,7 +1063,34 @@ elif page == "Tasks":
 
     if selected_task:
         page_header("Task details", "Review or update the selected task.")
-        if st.button("← Back to all tasks"):
+        task_flash_message = st.session_state.pop("task_flash_message", None)
+        if task_flash_message:
+            st.success(task_flash_message)
+        parent_epic = None
+        if selected_task.parent_task_id is not None:
+            try:
+                parent_epic = tasks.get(selected_task.parent_task_id)
+            except KeyError:
+                parent_epic = None
+        if parent_epic is not None:
+            back_to_epic, back_to_all = st.columns(2)
+            if back_to_epic.button(
+                f"← Back to epic: {parent_epic.title}",
+                use_container_width=True,
+            ):
+                open_task(parent_epic.id)
+                st.rerun()
+            if back_to_all.button(
+                "Back to all tasks",
+                use_container_width=True,
+            ):
+                close_task()
+                st.rerun()
+            st.caption(
+                f"Task {(selected_task.subtask_order or 0) + 1} in "
+                f"{parent_epic.title}"
+            )
+        elif st.button("← Back to all tasks"):
             close_task()
             st.rerun()
         dependency_blockers = task_service.blocking_prerequisites(
@@ -711,8 +1109,6 @@ elif page == "Tasks":
                 st.success("Task reopened.")
             st.rerun()
 
-        render_breakdown_planning(selected_task)
-
         children = tasks.list_subtasks(selected_task.id)
         if selected_task.task_type == "epic":
             completed_children = sum(
@@ -724,13 +1120,13 @@ elif page == "Tasks":
                 format_estimated_hours(selected_task.estimated_hours),
             )
             child_estimate.metric(
-                "Current subtask estimate",
+                "Current epic-task estimate",
                 format_estimated_hours(
                     tasks.subtask_estimated_hours(selected_task.id)
                 ),
             )
             completion.metric(
-                "Completed subtasks",
+                "Completed epic tasks",
                 f"{completed_children} of {len(children)}",
             )
 
@@ -750,6 +1146,11 @@ elif page == "Tasks":
             )
         else:
             st.metric("Recorded time", format_minutes(own_recorded_minutes))
+
+        if selected_task.task_type == "epic":
+            render_epic_tasks(selected_task, children)
+
+        render_breakdown_planning(selected_task)
 
         status_options = (
             ["Completed"]
@@ -782,27 +1183,24 @@ elif page == "Tasks":
                 priority_values,
                 index=priority_values.index(selected_task.priority),
             )
-            use_due = st.checkbox(
-                "Set due date",
-                value=selected_task.due_date is not None,
-            )
             due_date = st.date_input(
-                "Due date",
-                value=selected_task.due_date or date.today(),
+                "Due date (optional)",
+                value=selected_task.due_date,
                 format="MM-DD-YYYY",
-                disabled=not use_due,
-            )
-            use_estimate = st.checkbox(
-                "Set estimated duration",
-                value=selected_task.estimated_hours is not None,
+                help="Leave blank when the task has no due date.",
             )
             estimated_hours = st.number_input(
                 "Estimated hours",
                 min_value=0.25,
                 max_value=estimate_limit,
-                value=float(selected_task.estimated_hours or 0.25),
+                value=(
+                    float(selected_task.estimated_hours)
+                    if selected_task.estimated_hours is not None
+                    else None
+                ),
                 step=0.25,
-                disabled=not use_estimate,
+                placeholder="Optional",
+                help="Leave blank when the task has not been estimated.",
             )
             status = st.selectbox(
                 "Status",
@@ -810,7 +1208,6 @@ elif page == "Tasks":
                 index=status_options.index(selected_task.status),
                 disabled=selected_task.status == "Completed",
             )
-            source = st.text_input("Source or provenance", selected_task.source)
             notes = st.text_area("Notes", selected_task.notes)
             completion_criterion = st.text_area(
                 "Definition of done",
@@ -822,9 +1219,9 @@ elif page == "Tasks":
                 try:
                     task_service.update_task(selected_task.id, {
                         "title": title.strip(), "description": description, "priority": priority,
-                        "due_date": due_date if use_due else None, "status": status,
-                        "source": source or "User", "notes": notes,
-                        "estimated_hours": estimated_hours if use_estimate else None,
+                        "due_date": due_date, "status": status,
+                        "notes": notes,
+                        "estimated_hours": estimated_hours,
                         "completion_criterion": completion_criterion,
                     })
                     st.success("Task updated.")
@@ -1002,7 +1399,7 @@ elif page == "Tasks":
             for task in tasks.list_all(include_completed=True)
             if task.id != selected_task.id and task.id not in descendants
         ]
-        parent_labels = {None: "No parent (standard task)"}
+        parent_labels = {None: "No parent (standalone task)"}
         parent_labels.update(
             {task.id: f"{task.title} (task {task.id})" for task in parent_candidates}
         )
@@ -1015,7 +1412,7 @@ elif page == "Tasks":
         )
         with st.form(f"parent_{selected_task.id}"):
             chosen_parent = st.selectbox(
-                "Parent task",
+                "Parent epic",
                 parent_options,
                 index=parent_index,
                 format_func=parent_labels.get,
@@ -1195,97 +1592,64 @@ elif page == "Tasks":
                     st.session_state.pending_dependency_offer = None
                     st.rerun()
 
-        with st.expander("Add subtask", expanded=False):
+        add_task_label = (
+            "Add task to epic"
+            if selected_task.task_type == "epic"
+            else "Add first task and convert to epic"
+        )
+        with st.expander(add_task_label, expanded=False):
             with st.form(f"add_subtask_{selected_task.id}"):
                 subtask_title = st.text_input(
-                    "Subtask title",
+                    "Task title",
                     max_chars=TITLE_MAX_LENGTH,
                 )
                 subtask_description = st.text_area(
-                    "Subtask description",
+                    "Task description",
                     max_chars=DESCRIPTION_MAX_LENGTH,
                 )
                 subtask_priority = st.selectbox(
-                    "Subtask priority",
+                    "Task priority",
                     ["High", "Medium", "Low"],
                     index=["High", "Medium", "Low"].index(
                         selected_task.priority
                     ),
                 )
-                use_subtask_due = st.checkbox("Set subtask due date")
                 subtask_due = st.date_input(
-                    "Subtask due date",
-                    value=selected_task.due_date or date.today(),
+                    "Task due date (optional)",
+                    value=None,
                     format="MM-DD-YYYY",
-                    disabled=not use_subtask_due,
-                )
-                use_subtask_estimate = st.checkbox(
-                    "Set subtask estimated duration"
+                    help="Leave blank when the task has no due date.",
                 )
                 subtask_estimate = st.number_input(
-                    "Subtask estimated hours",
+                    "Task estimated hours (optional)",
                     min_value=0.25,
                     max_value=float(STANDARD_ESTIMATE_MAX_HOURS),
-                    value=0.25,
+                    value=None,
                     step=0.25,
-                    disabled=not use_subtask_estimate,
+                    placeholder="Optional",
+                    help="Leave blank when the task has not been estimated.",
                 )
                 subtask_done = st.text_area(
-                    "Subtask definition of done",
+                    "Task definition of done",
                     max_chars=DESCRIPTION_MAX_LENGTH,
                 )
-                if st.form_submit_button("Add subtask"):
+                if st.form_submit_button("Add task"):
                     try:
                         task_service.add_subtask(
                             selected_task.id,
                             title=subtask_title.strip(),
                             description=subtask_description,
                             priority=subtask_priority,
-                            due_date=subtask_due if use_subtask_due else None,
-                            estimated_hours=(
-                                subtask_estimate
-                                if use_subtask_estimate
-                                else None
-                            ),
+                            due_date=subtask_due,
+                            estimated_hours=subtask_estimate,
                             completion_criterion=subtask_done,
                         )
-                        st.success("Subtask added.")
+                        st.success(
+                            "Task added. The parent is now an epic."
+                        )
                         st.rerun()
                     except TaskValidationError as exc:
                         st.error(str(exc))
-
-        if children:
-            st.subheader("Subtasks")
-            for index, child in enumerate(children):
-                task_card(
-                    child,
-                    on_open=open_task,
-                    key_prefix=f"subtask_{selected_task.id}",
-                )
-                move_up, move_down, remove = st.columns(3)
-                if move_up.button(
-                    "Move up",
-                    key=f"move_up_{child.id}",
-                    disabled=index == 0,
-                    use_container_width=True,
-                ):
-                    task_service.move_subtask(child.id, -1)
-                    st.rerun()
-                if move_down.button(
-                    "Move down",
-                    key=f"move_down_{child.id}",
-                    disabled=index == len(children) - 1,
-                    use_container_width=True,
-                ):
-                    task_service.move_subtask(child.id, 1)
-                    st.rerun()
-                if remove.button(
-                    "Remove from epic",
-                    key=f"remove_subtask_{child.id}",
-                    use_container_width=True,
-                ):
-                    task_service.remove_subtask(child.id)
-                    st.rerun()
     else:
         page_header("Tasks", "Create and maintain locally stored work items.")
         with st.expander("Create task", expanded=False):
@@ -1296,19 +1660,22 @@ elif page == "Tasks":
                     max_chars=DESCRIPTION_MAX_LENGTH,
                 )
                 priority = st.selectbox("Priority", ["High", "Medium", "Low"], index=1)
-                use_due = st.checkbox("Set due date")
-                due_date = st.date_input("Due date", value=date.today(), format="MM-DD-YYYY", disabled=not use_due)
-                use_estimate = st.checkbox("Set estimated duration")
+                due_date = st.date_input(
+                    "Due date (optional)",
+                    value=None,
+                    format="MM-DD-YYYY",
+                    help="Leave blank when the task has no due date.",
+                )
                 estimated_hours = st.number_input(
                     "Estimated hours",
                     min_value=0.25,
                     max_value=float(STANDARD_ESTIMATE_MAX_HOURS),
-                    value=0.25,
+                    value=None,
                     step=0.25,
-                    disabled=not use_estimate,
+                    placeholder="Optional",
+                    help="Leave blank when the task has not been estimated.",
                 )
                 status = st.selectbox("Status", ["Open", "In Progress", "Blocked", "Completed"])
-                source = st.text_input("Source or provenance", value="User")
                 notes = st.text_area("Notes")
                 completion_criterion = st.text_area(
                     "Definition of done",
@@ -1316,11 +1683,12 @@ elif page == "Tasks":
                 )
                 if st.form_submit_button("Create task"):
                     try:
-                        task_service.create_task(title=title.strip(), description=description, priority=priority,
-                            due_date=due_date if use_due else None, status=status, source=source or "User", notes=notes,
-                            estimated_hours=estimated_hours if use_estimate else None,
+                        created_task = task_service.create_task(title=title.strip(), description=description, priority=priority,
+                            due_date=due_date, status=status, source="User", notes=notes,
+                            estimated_hours=estimated_hours,
                             completion_criterion=completion_criterion)
-                        st.success("Task created.")
+                        st.session_state.task_flash_message = "Task created successfully."
+                        open_task(created_task.id)
                         st.rerun()
                     except TaskValidationError as exc:
                         st.error(str(exc))
