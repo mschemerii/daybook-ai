@@ -941,6 +941,8 @@ class PlanningService:
         seen_keys: set[str] = set()
         seen_titles: set[str] = set()
         seen_sequences: set[int] = set()
+        removed_unanchored_due_dates = False
+        removed_self_dependencies: list[str] = []
         for raw_item in raw_subtasks:
             cls._require_exact_fields(raw_item, SUBTASK_FIELDS, "subtask")
             item_key = cls._bounded_text(raw_item["item_key"], "Item key", 40, True)
@@ -980,7 +982,11 @@ class PlanningService:
             if sequence in seen_sequences:
                 raise Phase6ValidationError("Suggested sequence values must be unique.")
             seen_sequences.add(sequence)
-            due_date = cls._validate_date(raw_item["due_date"])
+            raw_due_date = raw_item["due_date"]
+            if parent_task.due_date is None and raw_due_date is not None:
+                raw_due_date = None
+                removed_unanchored_due_dates = True
+            due_date = cls._validate_date(raw_due_date)
             raw_prerequisites = raw_item["prerequisite_item_keys"]
             if not isinstance(raw_prerequisites, list) or not all(
                 isinstance(key, str) for key in raw_prerequisites
@@ -989,7 +995,10 @@ class PlanningService:
             if len(raw_prerequisites) != len(set(raw_prerequisites)):
                 raise Phase6ValidationError("Prerequisite references must be unique.")
             if item_key in raw_prerequisites:
-                raise Phase6ValidationError("A proposed subtask cannot depend on itself.")
+                raw_prerequisites = [
+                    key for key in raw_prerequisites if key != item_key
+                ]
+                removed_self_dependencies.append(title)
             cls._reject_unsafe_actionable_text(
                 (title, description, completion),
             )
@@ -1030,6 +1039,19 @@ class PlanningService:
             advisories.append(ProposalAdvisory(kind, message))
 
         warnings = cls._proposal_warnings(parent_task, subtasks)
+        if removed_unanchored_due_dates:
+            warnings = (
+                "Generated subtask due dates were removed because the parent "
+                "task has no due date.",
+                *warnings,
+            )
+        if removed_self_dependencies:
+            labels = ", ".join(removed_self_dependencies)
+            warnings = (
+                f"Removed an impossible self-dependency from: {labels}. "
+                "Review prerequisite links before approval.",
+                *warnings,
+            )
         return ValidatedDecompositionProposal(
             proposal_type=PROPOSAL_TYPE,
             parent_task_id=int(parent_task.id),

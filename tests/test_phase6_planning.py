@@ -374,15 +374,12 @@ def test_duplicate_normalized_title_and_sequence_rejected(task_repo):
         )
 
 
-def test_invalid_prerequisite_self_dependency_and_cycle_rejected(task_repo):
+def test_invalid_prerequisite_and_cycle_rejected(task_repo):
     parent = ready_task(task_repo)
     cases = []
     missing = valid_payload(parent.id, "expected")
     missing["subtasks"][1]["prerequisite_item_keys"] = ["outside"]
     cases.append((missing, "outside"))
-    self_dependent = valid_payload(parent.id, "expected")
-    self_dependent["subtasks"][0]["prerequisite_item_keys"] = ["research"]
-    cases.append((self_dependent, "itself"))
     cycle = valid_payload(parent.id, "expected")
     cycle["subtasks"][0]["prerequisite_item_keys"] = ["draft"]
     cases.append((cycle, "cycle"))
@@ -393,6 +390,25 @@ def test_invalid_prerequisite_self_dependency_and_cycle_rejected(task_repo):
             )
 
 
+def test_self_dependency_is_removed_with_review_warning(task_repo):
+    parent = ready_task(task_repo)
+    payload = valid_payload(parent.id, "expected")
+    payload["subtasks"][0]["prerequisite_item_keys"] = ["research"]
+
+    proposal = PlanningService.validate_decomposition_response(
+        json.dumps(payload),
+        parent_task=parent,
+        expected_proposal_id="expected",
+    )
+
+    assert proposal.subtasks[0].prerequisite_item_keys == ()
+    assert any(
+        "Removed an impossible self-dependency" in warning
+        and "Review source material" in warning
+        for warning in proposal.warnings
+    )
+
+
 def test_due_after_parent_warns_but_remains_reviewable(task_repo):
     parent = ready_task(task_repo)
     payload = valid_payload(parent.id, "expected")
@@ -401,6 +417,21 @@ def test_due_after_parent_warns_but_remains_reviewable(task_repo):
         json.dumps(payload), parent_task=parent, expected_proposal_id="expected"
     )
     assert any("later than the parent" in warning for warning in proposal.warnings)
+
+
+def test_due_dates_without_parent_anchor_are_removed_with_warning(task_repo):
+    parent = ready_task(task_repo, due_date=None)
+    proposal = PlanningService.validate_decomposition_response(
+        json.dumps(valid_payload(parent.id, "expected")),
+        parent_task=parent,
+        expected_proposal_id="expected",
+    )
+
+    assert all(item.due_date is None for item in proposal.subtasks)
+    assert any(
+        "removed because the parent task has no due date" in warning
+        for warning in proposal.warnings
+    )
 
 
 def test_material_estimate_difference_shows_original_and_total(task_repo):
