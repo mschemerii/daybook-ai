@@ -292,6 +292,21 @@ def test_missing_advisories_are_safely_normalized_to_an_empty_list(task_repo):
     assert proposal.advisories == ()
 
 
+def test_zero_based_sequences_are_safely_normalized(task_repo):
+    parent = ready_task(task_repo)
+    payload = valid_payload(parent.id, "expected")
+    for sequence, item in enumerate(payload["subtasks"]):
+        item["suggested_sequence"] = sequence
+
+    proposal = PlanningService.validate_decomposition_response(
+        json.dumps(payload),
+        parent_task=parent,
+        expected_proposal_id="expected",
+    )
+
+    assert [item.suggested_sequence for item in proposal.subtasks] == [1, 2]
+
+
 @pytest.mark.parametrize(
     "mutation,match",
     [
@@ -329,7 +344,7 @@ def test_top_level_contract_rejections(task_repo, mutation, match):
         ("priority", "Urgent", "priority"),
         ("priority", "Low", "inherited parent priority"),
         ("due_date", "08/20/2026", "due date"),
-        ("suggested_sequence", 0, "positive integers"),
+        ("suggested_sequence", -1, "positive integers"),
         ("completion_criterion", "", "Completion criterion is required"),
     ],
 )
