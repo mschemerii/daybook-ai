@@ -616,7 +616,12 @@ def navigate_to(page_name: str) -> None:
         st.session_state.selected_task_id = None
 
 
-def render_task_hierarchy(task, *, depth: int = 0) -> None:
+def render_task_hierarchy(
+    task,
+    *,
+    depth: int = 0,
+    show_children: bool = True,
+) -> None:
     if depth:
         st.caption(f"{'↳ ' * depth}Task in the epic above")
     task_card(
@@ -625,8 +630,24 @@ def render_task_hierarchy(task, *, depth: int = 0) -> None:
         key_prefix=f"all_level_{depth}",
         blocking_prerequisites=task_service.blocking_prerequisites(task.id),
     )
-    for child in tasks.list_subtasks(task.id):
-        render_task_hierarchy(child, depth=depth + 1)
+
+    children = tasks.list_subtasks(task.id)
+    if children and depth == 0 and not show_children:
+        completed_children = sum(
+            child.status == "Completed" for child in children
+        )
+        st.caption(
+            f"Epic · {completed_children} of {len(children)} tasks complete · "
+            "Open the epic to view ordered tasks and prerequisites."
+        )
+        return
+
+    for child in children:
+        render_task_hierarchy(
+            child,
+            depth=depth + 1,
+            show_children=show_children,
+        )
 
 
 def render_epic_tasks(epic, children) -> None:
@@ -955,6 +976,20 @@ st.markdown(
     border-radius:.2rem;
 }
 [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {color:var(--text-color);}
+.st-key-task_index_controls {
+    margin:.15rem 0 .75rem 0;
+    padding:.45rem .65rem;
+    border:1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
+    border-radius:.65rem;
+    background:color-mix(
+        in srgb,
+        var(--secondary-background-color) 72%,
+        var(--background-color)
+    );
+}
+.st-key-task_index_controls [data-testid="stHorizontalBlock"] {
+    align-items:center;
+}
 .small-note {font-size:.85rem; color:var(--text-color); opacity:.86;}
 </style>
 """,
@@ -1816,12 +1851,39 @@ elif page == "Tasks":
                     except TaskValidationError as exc:
                         st.error(str(exc))
 
-        show_completed = st.checkbox("Show completed", value=False)
+        with st.container(key="task_index_controls"):
+            show_completed_col, show_epic_tasks_col, list_note_col = st.columns(
+                [1, 1.35, 2.65],
+                vertical_alignment="center",
+            )
+            show_completed = show_completed_col.checkbox(
+                "Show completed",
+                value=False,
+            )
+            show_epic_tasks = show_epic_tasks_col.checkbox(
+                "Show tasks inside epics",
+                value=False,
+            )
+            list_note_col.caption(
+                "Epics stay compact by default. Open an epic for its ordered "
+                "task sequence, prerequisites, time, and planning controls."
+            )
+
         current_tasks = tasks.list_roots(show_completed)
         if not current_tasks:
             st.info("No tasks to show.")
-        for task in current_tasks:
-            render_task_hierarchy(task)
+        else:
+            st.caption(
+                f"{len(current_tasks)} root work item"
+                f"{'' if len(current_tasks) == 1 else 's'}"
+            )
+            task_columns = st.columns(2)
+            for index, task in enumerate(current_tasks):
+                with task_columns[index % 2]:
+                    render_task_hierarchy(
+                        task,
+                        show_children=show_epic_tasks,
+                    )
 
 elif page == "Daily Journal":
     page_header("Daily Journal", "Record progress, blockers, and reflection without scoring productivity.")

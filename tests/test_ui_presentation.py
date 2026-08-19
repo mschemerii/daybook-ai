@@ -161,6 +161,16 @@ def test_task_card_css_includes_narrow_window_rules() -> None:
     assert "flex-basis:100%" in app_source
 
 
+def test_tasks_index_defaults_to_compact_epic_overview() -> None:
+    app_source = APP_FILE.read_text(encoding="utf-8")
+
+    assert '"Show tasks inside epics"' in app_source
+    assert "show_children=show_epic_tasks" in app_source
+    assert "task_columns = st.columns(2)" in app_source
+    assert "if children and depth == 0 and not show_children" in app_source
+    assert "Open the epic to view ordered tasks and prerequisites." in app_source
+
+
 def test_phase6_generation_and_phase7_review_have_explicit_boundaries() -> None:
     app_source = APP_FILE.read_text(encoding="utf-8")
 
