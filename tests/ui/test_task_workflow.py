@@ -126,6 +126,13 @@ def test_create_open_edit_complete_and_reopen_task(
         exact=True,
     ).click()
 
+    # Streamlit reruns asynchronously after the button click. Wait until the
+    # completed card disappears so navigation cannot race the reopen rerun.
+    completed_heading.wait_for(
+        state="hidden",
+        timeout=15_000,
+    )
+
     navigate(app_frame, "Tasks")
 
     app_frame.get_by_role(

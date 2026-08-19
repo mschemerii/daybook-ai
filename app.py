@@ -45,7 +45,7 @@ from src.ui.components import format_estimated_hours, page_header, task_card
 from src.utils.dates import format_date, format_datetime
 
 load_dotenv()
-st.set_page_config(page_title="Daybook AI", page_icon="📘", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Daybook AI", page_icon="📘", layout="wide", initial_sidebar_state="expanded")
 
 DB_PATH = Path(os.getenv("DAYBOOK_DB_PATH", "data/daybook.db"))
 MODEL_BASE_URL = os.getenv("DAYBOOK_MODEL_BASE_URL", "http://127.0.0.1:8080/v1")
@@ -197,50 +197,79 @@ def render_breakdown_planning(task) -> None:
             "reviewable tasks is strongly recommended, but remains optional."
         )
 
+    saved_answers = planning.get_clarification_answers(int(task.id))
     active = st.session_state.breakdown_task_id == task.id
     if not active and st.button(
         "Request Breakdown",
         key=f"request_breakdown_{task.id}",
     ):
         st.session_state.breakdown_task_id = task.id
-        st.session_state.breakdown_answers = {}
+        st.session_state.breakdown_answers = dict(saved_answers)
         st.session_state.breakdown_result = None
         st.session_state.breakdown_error = ""
         st.rerun()
     if not active:
-        st.caption(
-            "Any task may be submitted manually. This does not change its "
-            "deterministic classification or create subtasks."
-        )
+        if saved_answers:
+            st.caption(
+                "Clarification answers are saved locally for this task and will "
+                "be restored when breakdown planning is reopened."
+            )
+        else:
+            st.caption(
+                "Any task may be submitted manually. This does not change its "
+                "deterministic classification or create subtasks."
+            )
         return
 
-    answers = dict(st.session_state.breakdown_answers)
+    answers = dict(saved_answers)
+    st.session_state.breakdown_answers = dict(answers)
     readiness = planning_service.readiness(task, answers)
+    clarification_questions = planning_service.readiness(task, {}).questions
+
     if not readiness.ready:
         st.info(
             "More information is needed before an approval-ready proposal can "
             "be requested. No answers will be invented."
         )
+
+    if clarification_questions:
         with st.form(f"breakdown_clarification_{task.id}"):
             pending_answers = {}
-            for field, question in readiness.questions:
+            for field, question in clarification_questions:
                 pending_answers[field] = st.text_area(
                     question,
                     value=answers.get(field, ""),
                     key=f"breakdown_{task.id}_{field}",
                     max_chars=DESCRIPTION_MAX_LENGTH,
                 )
-            if st.form_submit_button("Save clarification answers"):
-                answers.update(
-                    {
-                        key: value.strip()
-                        for key, value in pending_answers.items()
-                        if value.strip()
-                    }
+            submit_label = (
+                "Update clarification answers"
+                if saved_answers
+                else "Save clarification answers"
+            )
+            if st.form_submit_button(submit_label):
+                updated_answers = dict(answers)
+                for field, value in pending_answers.items():
+                    cleaned = value.strip()
+                    if cleaned:
+                        updated_answers[field] = cleaned
+                    else:
+                        updated_answers.pop(field, None)
+                persisted_answers = planning.save_clarification_answers(
+                    int(task.id),
+                    updated_answers,
                 )
-                st.session_state.breakdown_answers = answers
+                st.session_state.breakdown_answers = dict(persisted_answers)
                 st.session_state.breakdown_error = ""
                 st.rerun()
+
+        if saved_answers:
+            st.caption(
+                "Clarification answers are saved in the local Daybook SQLite "
+                "database for this task. Use Update clarification answers to change them."
+            )
+
+    if not readiness.ready:
         st.caption(
             "An approval-ready or SQLite-ready proposal will not be generated "
             "while material context is missing."
@@ -502,14 +531,26 @@ def render_breakdown_planning(task) -> None:
                 max_value=float(STANDARD_ESTIMATE_MAX_HOURS), step=0.25,
                 value=0.25, key=f"manual_estimate_{proposal.proposal_id}",
             )
+            manual_prerequisite_keys = st.multiselect(
+                "Manual task prerequisites",
+                list(names),
+                format_func=lambda key: f"{names.get(key, key)} [{key}]",
+                key=f"manual_prerequisites_{proposal.proposal_id}",
+            )
             if st.form_submit_button("Insert task"):
                 try:
-                    planning_service.add_review_item(
+                    updated_review = planning_service.add_review_item(
                         proposal.proposal_id,
                         title=manual_title,
                         description=manual_description,
                         completion_criterion=manual_completion,
                         estimated_hours=manual_estimate,
+                    )
+                    manual_item = updated_review.items[-1]
+                    planning_service.set_review_prerequisites(
+                        proposal.proposal_id,
+                        manual_item.item_key,
+                        manual_prerequisite_keys,
                     )
                     st.rerun()
                 except Phase7ValidationError as exc:
@@ -717,50 +758,115 @@ def render_epic_tasks(epic, children) -> None:
 st.markdown(
     """
 <style>
-.block-container {padding-top: 2.6rem; padding-bottom: 2rem; max-width: 1120px;}
-[data-testid="stSidebar"], [data-testid="collapsedControl"] {display: none;}
+.block-container {
+    padding-top: 1.15rem;
+    padding-bottom: 2rem;
+    max-width: 1480px;
+}
+[data-testid="stSidebar"] {
+    border-right: 1px solid color-mix(in srgb, var(--text-color) 14%, transparent);
+    background: color-mix(
+        in srgb,
+        var(--secondary-background-color) 76%,
+        var(--background-color)
+    );
+}
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: .9rem;
+}
+.st-key-sidebar_brand {
+    padding: .2rem .35rem .8rem .35rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
+    margin-bottom: .55rem;
+}
+.sidebar-brand-title {
+    font-size: 1.08rem;
+    font-weight: 760;
+    line-height: 1.2;
+    margin: 0;
+}
+.sidebar-brand-subtitle {
+    font-size: .76rem;
+    opacity: .72;
+    margin-top: .15rem;
+}
+.st-key-app_navigation [role="radiogroup"] {
+    display:flex;
+    flex-direction:column;
+    gap:.2rem;
+}
+.st-key-app_navigation label {
+    width:100%;
+    padding:.42rem .55rem;
+    border:1px solid transparent;
+    border-radius:.5rem;
+}
+.st-key-app_navigation label:hover {
+    background:color-mix(
+        in srgb,
+        #0072B2 8%,
+        var(--secondary-background-color)
+    );
+}
+.st-key-app_navigation label:has(input:checked) {
+    border-color:color-mix(in srgb, #0072B2 55%, transparent);
+    background:color-mix(
+        in srgb,
+        #0072B2 13%,
+        var(--secondary-background-color)
+    );
+    font-weight:700;
+}
 .st-key-top_navigation {
-    position: sticky;
-    top: 2.25rem;
-    z-index: 999;
-    background: var(--background-color);
-    padding: .8rem 0 .7rem 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--text-color) 18%, transparent);
+    position:sticky;
+    top:0;
+    z-index:999;
+    background:color-mix(in srgb, var(--background-color) 94%, transparent);
+    backdrop-filter:blur(14px);
+    padding:.2rem 0 .55rem 0;
+    border-bottom:1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
+    margin-bottom:.8rem;
 }
-.st-key-top_navigation [role="radiogroup"] {gap: .25rem; flex-wrap: wrap;}
-.st-key-top_navigation label {
-    border: 1px solid color-mix(in srgb, var(--text-color) 22%, transparent);
-    border-radius: .55rem;
-    padding: .25rem .6rem;
-    background: var(--secondary-background-color);
+.topbar-kicker {
+    font-size:.7rem;
+    font-weight:700;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    opacity:.64;
 }
-.st-key-top_navigation label:has(input:checked) {
-    border-width: 2px;
-    border-color: #0072B2;
+.topbar-title {
+    font-size:1.08rem;
+    font-weight:760;
+    line-height:1.2;
+    margin-top:.05rem;
+}
+.topbar-runtime {
+    font-size:.72rem;
+    opacity:.68;
+    margin-top:.12rem;
 }
 .shutdown-link-wrap {
     display:flex;
     justify-content:flex-end;
     align-items:center;
-    padding-top:.2rem;
+    height:100%;
 }
 .shutdown-link {
     display:inline-flex;
-    width:100%;
-    min-height:2.45rem;
+    min-height:2.2rem;
     align-items:center;
     justify-content:center;
-    border-radius:.55rem;
-    border:1px solid color-mix(in srgb, #D55E00 70%, var(--text-color));
+    border-radius:.5rem;
+    border:1px solid color-mix(in srgb, #D55E00 58%, var(--text-color));
     color:var(--text-color) !important;
-    background:color-mix(in srgb, #D55E00 12%, var(--background-color));
+    background:color-mix(in srgb, #D55E00 9%, var(--background-color));
     font-weight:650;
     text-decoration:none !important;
-    padding:.45rem .75rem;
+    padding:.35rem .7rem;
 }
 .shutdown-link:hover {
     border-color:#D55E00;
-    background:color-mix(in srgb, #D55E00 20%, var(--background-color));
+    background:color-mix(in srgb, #D55E00 16%, var(--background-color));
 }
 .task-card-title {
     margin:0 0 .35rem 0;
@@ -855,26 +961,58 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-with st.container(key="top_navigation"):
-    detected_gpu = os.getenv(
-        "DAYBOOK_DETECTED_GPU",
-        "Not checked—start with python run.py",
-    )
-    detected_backend = os.getenv(
-        "DAYBOOK_DETECTED_BACKEND",
-        "Unknown",
-    )
+detected_gpu = os.getenv(
+    "DAYBOOK_DETECTED_GPU",
+    "Not checked—start with python run.py",
+)
+detected_backend = os.getenv(
+    "DAYBOOK_DETECTED_BACKEND",
+    "Unknown",
+)
 
-    title_column, shutdown_column = st.columns(
+with st.sidebar:
+    with st.container(key="sidebar_brand"):
+        st.markdown(
+            """
+            <div class="sidebar-brand-title">📘 Daybook AI</div>
+            <div class="sidebar-brand-subtitle">Your local work companion</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with st.container(key="app_navigation"):
+        page = st.radio(
+            "Primary navigation",
+            PAGES,
+            label_visibility="collapsed",
+            key="navigation_radio",
+        )
+
+    st.caption("Local-first · No telemetry")
+    st.caption(f"Backend: {detected_backend}")
+
+    if page != st.session_state.page:
+        st.session_state.page = page
+        if page != "Tasks":
+            st.session_state.selected_task_id = None
+        st.rerun()
+
+with st.container(key="top_navigation"):
+    heading_column, shutdown_column = st.columns(
         [9, 2],
         vertical_alignment="center",
     )
 
-    with title_column:
-        st.markdown("### Daybook AI")
-        st.caption(
-            "Local-first prototype · No telemetry · "
-            f"Runtime: {detected_gpu} · Backend: {detected_backend}"
+    with heading_column:
+        st.markdown(
+            f"""
+            <div class="topbar-kicker">Daybook AI</div>
+            <div class="topbar-title">{escape(st.session_state.page)}</div>
+            <div class="topbar-runtime">
+                Runtime: {escape(detected_gpu)} · Backend: {escape(detected_backend)}
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
     with shutdown_column:
@@ -883,7 +1021,6 @@ with st.container(key="top_navigation"):
             f"{CONTROLLER_URL.rstrip('/')}/shutdown?{shutdown_query}",
             quote=True,
         )
-
         st.markdown(
             f"""
             <div class="shutdown-link-wrap">
@@ -900,20 +1037,6 @@ with st.container(key="top_navigation"):
             """,
             unsafe_allow_html=True,
         )
-
-    page = st.radio(
-        "Primary navigation",
-        PAGES,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="navigation_radio",
-    )
-
-    if page != st.session_state.page:
-        st.session_state.page = page
-        if page != "Tasks":
-            st.session_state.selected_task_id = None
-        st.rerun()
 
 
 page = st.session_state.page

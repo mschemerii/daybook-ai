@@ -82,6 +82,78 @@ class PlanningRepository:
             ).fetchone()
         return self._from_row(row) if row is not None else None
 
+    def get_clarification_answers(self, task_id: int) -> dict[str, str]:
+        """Return durable clarification answers for one task or epic."""
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT answers_json
+                FROM task_clarification_answers
+                WHERE task_id = ?
+                """,
+                (task_id,),
+            ).fetchone()
+        if row is None:
+            return {}
+        try:
+            value = json.loads(row["answers_json"])
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(
+                "Persisted clarification answers are unreadable."
+            ) from exc
+        if not isinstance(value, dict) or not all(
+            isinstance(key, str) and isinstance(answer, str)
+            for key, answer in value.items()
+        ):
+            raise ValueError(
+                "Persisted clarification answers have an invalid format."
+            )
+        return {
+            key: answer.strip()
+            for key, answer in value.items()
+            if answer.strip()
+        }
+
+    def save_clarification_answers(
+        self,
+        task_id: int,
+        answers: dict[str, str],
+    ) -> dict[str, str]:
+        """Insert or update task clarification answers; empty answers clear them."""
+        normalized = {
+            key: answer.strip()
+            for key, answer in answers.items()
+            if isinstance(key, str)
+            and isinstance(answer, str)
+            and answer.strip()
+        }
+        with self.db.connect() as conn:
+            if not normalized:
+                conn.execute(
+                    "DELETE FROM task_clarification_answers WHERE task_id = ?",
+                    (task_id,),
+                )
+                return {}
+            conn.execute(
+                """
+                INSERT INTO task_clarification_answers(task_id, answers_json)
+                VALUES (?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                    answers_json = excluded.answers_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    task_id,
+                    json.dumps(
+                        normalized,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                ),
+            )
+        return self.get_clarification_answers(task_id)
+
     def set_status(self, proposal_id: str, status: str) -> DecompositionProposal:
         if status not in {"draft", "approved", "rejected", "cancelled"}:
             raise ValueError("Unsupported proposal status")

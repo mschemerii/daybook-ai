@@ -59,7 +59,7 @@ def test_fresh_database_receives_all_migrations_and_foreign_keys(db):
         }
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
-    assert versions == [1, 2]
+    assert versions == [1, 2, 3]
     assert {
         "task_dependencies",
         "time_entries",
@@ -67,6 +67,7 @@ def test_fresh_database_receives_all_migrations_and_foreign_keys(db):
         "proposal_task_links",
         "reporting_settings",
         "task_deletion_audit",
+        "task_clarification_answers",
     } <= tables
 
 
@@ -104,7 +105,7 @@ def test_migration_is_idempotent(tmp_path):
 
     with sqlite3.connect(path) as conn:
         after = list(conn.iterdump())
-        assert conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 3
     assert after == before
 
 
@@ -134,7 +135,38 @@ def test_versioned_v08_baseline_upgrades(tmp_path):
             for row in conn.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
-        ] == [1, 2]
+        ] == [1, 2, 3]
+
+
+def test_version2_database_upgrades_to_durable_clarification_storage(tmp_path):
+    path = tmp_path / "version2.db"
+    _create_v08_database(path)
+
+    with sqlite3.connect(path) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        migrate(conn, path, migrations=MIGRATIONS[:2])
+
+    with sqlite3.connect(path) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'task_clarification_answers'"
+        ).fetchone() is None
+
+    Database(path)
+
+    with sqlite3.connect(path) as conn:
+        versions = [
+            row[0]
+            for row in conn.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
+        assert versions == [1, 2, 3]
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'task_clarification_answers'"
+        ).fetchone() is not None
 
 
 def test_failed_migration_rolls_back_and_leaves_database_usable(tmp_path):
@@ -145,7 +177,7 @@ def test_failed_migration_rolls_back_and_leaves_database_usable(tmp_path):
         conn.execute("CREATE TABLE should_rollback(id INTEGER)")
         raise RuntimeError("injected migration failure")
 
-    failing = Migration(3, "injected failure", fail_after_write)
+    failing = Migration(4, "injected failure", fail_after_write)
     with database.connect() as conn:
         with pytest.raises(RuntimeError, match="injected migration failure"):
             migrate(conn, path, migrations=(*MIGRATIONS, failing))
@@ -160,7 +192,7 @@ def test_failed_migration_rolls_back_and_leaves_database_usable(tmp_path):
             for row in conn.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
-        ] == [1, 2]
+        ] == [1, 2, 3]
 
 
 def test_unknown_unversioned_schema_fails_without_mutation(tmp_path):
@@ -264,3 +296,48 @@ def test_repository_foundations_round_trip_rows(db):
         )
     )
     assert proposals.get(proposal.proposal_id).payload_json == '{"items":[]}'
+
+
+
+def test_clarification_answers_persist_update_clear_and_cascade(db):
+    tasks = TaskRepository(db)
+    task = tasks.create(Task(None, "Clarification parent"))
+    planning = PlanningRepository(db)
+
+    assert planning.get_clarification_answers(task.id) == {}
+
+    saved = planning.save_clarification_answers(
+        task.id,
+        {
+            "expected_outcome": "A reviewed deployment plan",
+            "constraints": "Use the existing environment",
+        },
+    )
+    assert saved == {
+        "constraints": "Use the existing environment",
+        "expected_outcome": "A reviewed deployment plan",
+    }
+    assert PlanningRepository(db).get_clarification_answers(task.id) == saved
+
+    updated = planning.save_clarification_answers(
+        task.id,
+        {
+            **saved,
+            "expected_outcome": "An approved deployment plan",
+            "constraints": "",
+        },
+    )
+    assert updated == {
+        "expected_outcome": "An approved deployment plan",
+    }
+
+    planning.save_clarification_answers(task.id, {})
+    assert planning.get_clarification_answers(task.id) == {}
+
+    planning.save_clarification_answers(
+        task.id,
+        {"expected_outcome": "Persist until task deletion"},
+    )
+    with db.connect() as conn:
+        conn.execute("DELETE FROM tasks WHERE id = ?", (task.id,))
+    assert planning.get_clarification_answers(task.id) == {}

@@ -176,6 +176,17 @@ def test_phase6_generation_and_phase7_review_have_explicit_boundaries() -> None:
     assert "Untrusted local AI explanation" in app_source
     assert "Deterministic fallback" in app_source
 
+
+def test_clarification_answers_are_durable_and_use_save_then_update_wording() -> None:
+    app_source = APP_FILE.read_text(encoding="utf-8")
+
+    assert "planning.get_clarification_answers" in app_source
+    assert "planning.save_clarification_answers" in app_source
+    assert '"Save clarification answers"' in app_source
+    assert '"Update clarification answers"' in app_source
+    assert "local Daybook SQLite" in app_source
+
+
 def test_task_estimate_is_directly_optional_and_origin_is_application_controlled() -> None:
     app_source = APP_FILE.read_text(encoding="utf-8")
 

@@ -22,7 +22,7 @@ def test_primary_navigation_options_are_visible(
 
     for page_name in expected:
         option = app_frame.locator(
-            ".st-key-top_navigation label"
+            ".st-key-app_navigation label"
         ).filter(
             has_text=page_name,
         )
