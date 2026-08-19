@@ -1306,9 +1306,27 @@ elif page == "Tasks":
             st.metric("Recorded time", format_minutes(own_recorded_minutes))
 
         if selected_task.task_type == "epic":
-            render_epic_tasks(selected_task, children)
+            (
+                overview_tab,
+                epic_tasks_tab,
+                ai_tab,
+                time_tab,
+                structure_tab,
+            ) = st.tabs(
+                ["Overview", "Epic tasks", "AI planning", "Time", "Structure"]
+            )
+        else:
+            overview_tab, ai_tab, time_tab, structure_tab = st.tabs(
+                ["Overview", "AI planning", "Time", "Structure"]
+            )
+            epic_tasks_tab = None
 
-        render_breakdown_planning(selected_task)
+        if epic_tasks_tab is not None:
+            with epic_tasks_tab:
+                render_epic_tasks(selected_task, children)
+
+        with ai_tab:
+            render_breakdown_planning(selected_task)
 
         status_options = (
             ["Completed"]
@@ -1324,7 +1342,7 @@ elif page == "Tasks":
             if selected_task.task_type == "epic"
             else STANDARD_ESTIMATE_MAX_HOURS
         )
-        with st.form(f"edit_{selected_task.id}"):
+        with overview_tab.form(f"edit_{selected_task.id}"):
             title = st.text_input(
                 "Title",
                 selected_task.title,
@@ -1465,12 +1483,12 @@ elif page == "Tasks":
                 st.session_state.pending_delete_task_id = None
                 st.rerun()
 
-        st.subheader("Recorded time")
-        st.caption(
+        time_tab.subheader("Recorded time")
+        time_tab.caption(
             "Recorded time is separate from the estimate. Each entry is limited "
             "to 12 hours, and all entries for one day cannot exceed 24 hours."
         )
-        with st.form(f"add_time_entry_{selected_task.id}"):
+        with time_tab.form(f"add_time_entry_{selected_task.id}"):
             entry_date = st.date_input(
                 "Work date",
                 value=date.today(),
@@ -1506,7 +1524,7 @@ elif page == "Tasks":
         task_time_entries = time_entry_service.list_for_task(selected_task.id)
         if task_time_entries:
             for entry in task_time_entries:
-                with st.expander(
+                with time_tab.expander(
                     f"{format_date(entry.work_date)} · {format_minutes(entry.minutes)}"
                 ):
                     with st.form(f"edit_time_entry_{entry.id}"):
@@ -1548,9 +1566,9 @@ elif page == "Tasks":
                             time_entry_service.delete(entry.id)
                             st.rerun()
         else:
-            st.caption("No recorded time for this task.")
+            time_tab.caption("No recorded time for this task.")
 
-        st.subheader("Hierarchy")
+        structure_tab.subheader("Hierarchy")
         descendants = tasks.descendant_ids(selected_task.id)
         parent_candidates = [
             task
@@ -1568,7 +1586,7 @@ elif page == "Tasks":
             if current_parent in parent_options
             else 0
         )
-        with st.form(f"parent_{selected_task.id}"):
+        with structure_tab.form(f"parent_{selected_task.id}"):
             chosen_parent = st.selectbox(
                 "Parent epic",
                 parent_options,
@@ -1589,18 +1607,18 @@ elif page == "Tasks":
                 except ValueError as exc:
                     st.error(str(exc))
 
-        st.subheader("Dependencies")
-        st.caption(
+        structure_tab.subheader("Dependencies")
+        structure_tab.caption(
             "Direction: this task requires its prerequisites. Blocking is "
             "calculated from incomplete prerequisites."
         )
         prerequisite_tasks = task_service.prerequisites(selected_task.id)
         dependent_tasks = task_service.dependents(selected_task.id)
 
-        st.markdown("**Prerequisites this task requires**")
+        structure_tab.markdown("**Prerequisites this task requires**")
         if prerequisite_tasks:
             for prerequisite in prerequisite_tasks:
-                prerequisite_label, remove_prerequisite = st.columns([4, 1])
+                prerequisite_label, remove_prerequisite = structure_tab.columns([4, 1])
                 prerequisite_label.write(task_identity(prerequisite))
                 if remove_prerequisite.button(
                     "Remove",
@@ -1616,12 +1634,12 @@ elif page == "Tasks":
                     )
                     st.rerun()
         else:
-            st.caption("No prerequisites.")
+            structure_tab.caption("No prerequisites.")
 
-        st.markdown("**Tasks that depend on this task**")
+        structure_tab.markdown("**Tasks that depend on this task**")
         if dependent_tasks:
             for dependent in dependent_tasks:
-                dependent_label, remove_dependent = st.columns([4, 1])
+                dependent_label, remove_dependent = structure_tab.columns([4, 1])
                 dependent_label.write(task_identity(dependent))
                 if remove_dependent.button(
                     "Remove",
@@ -1634,7 +1652,7 @@ elif page == "Tasks":
                     )
                     st.rerun()
         else:
-            st.caption("No dependent tasks.")
+            structure_tab.caption("No dependent tasks.")
 
         dependency_candidates = [
             task
@@ -1645,7 +1663,7 @@ elif page == "Tasks":
             candidate_labels = {
                 task.id: task_identity(task) for task in dependency_candidates
             }
-            with st.form(f"add_dependency_{selected_task.id}"):
+            with structure_tab.form(f"add_dependency_{selected_task.id}"):
                 prerequisite_id = st.selectbox(
                     "Add prerequisite",
                     list(candidate_labels),
@@ -1664,7 +1682,7 @@ elif page == "Tasks":
                     except ValueError as exc:
                         st.error(str(exc))
         else:
-            st.caption("Create another task before adding a dependency.")
+            structure_tab.caption("Create another task before adding a dependency.")
 
         pending_offer: DependencyOffer | None = (
             st.session_state.pending_dependency_offer
@@ -1755,7 +1773,7 @@ elif page == "Tasks":
             if selected_task.task_type == "epic"
             else "Add first task and convert to epic"
         )
-        with st.expander(add_task_label, expanded=False):
+        with structure_tab.expander(add_task_label, expanded=False):
             with st.form(f"add_subtask_{selected_task.id}"):
                 subtask_title = st.text_input(
                     "Task title",
