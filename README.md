@@ -170,6 +170,24 @@ The first launch may take longer because the model and runtime are downloaded. P
 
 The normal user does not need the terminal after startup. Select **Shut down** in the Daybook AI header. The browser moves to a stable local goodbye page, then the launcher stops Streamlit and gracefully terminates only the llama.cpp process that it started. An already-running external llama.cpp server is left running. `Ctrl+C` remains available as a development fallback.
 
+### Check or stop Daybook AI from the terminal
+
+The managed launcher records only the local controller information needed to manage the running instance in a git-ignored `.daybook-runtime.json` file. The file is created with restrictive permissions when supported by the operating system and is removed during normal shutdown.
+
+Check whether the managed application is running:
+
+```bash
+python run.py --status
+```
+
+Request the same graceful shutdown used by the in-app **Shut down** control:
+
+```bash
+python run.py --stop
+```
+
+`--stop` sends an authenticated request to the existing local controller. It does not terminate an unrelated process merely because it is using a Daybook port, and an externally managed llama.cpp server remains running.
+
 ### Direct Streamlit command
 
 The recommended command is `python run.py` because it also handles hardware detection and llama.cpp. To start only Streamlit and still request automatic browser opening:

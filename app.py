@@ -19,6 +19,10 @@ from src.repositories.planning_repository import PlanningRepository
 from src.repositories.planning_repository import ApprovalIntegrityError
 from src.repositories.task_repository import TaskRepository
 from src.repositories.time_entry_repository import TimeEntryRepository
+from src.runtime.preferences import (
+    load_appearance_preference,
+    save_appearance_preference,
+)
 from src.services.context_service import ContextService
 from src.services.planning_service import (
     Phase6ValidationError,
@@ -54,6 +58,29 @@ MODEL_API_KEY = os.getenv("DAYBOOK_MODEL_API_KEY", "")
 CONTROLLER_URL = os.getenv("DAYBOOK_CONTROLLER_URL", "http://127.0.0.1:8500")
 CONTROLLER_TOKEN = os.getenv("DAYBOOK_CONTROLLER_TOKEN", "")
 PAGES = ["Today", "Tasks", "Daily Journal", "Assistant", "About", "Ethical AI"]
+
+PREFERENCES_PATH = Path(
+    os.getenv(
+        "DAYBOOK_PREFERENCES_PATH",
+        str(Path(__file__).resolve().with_name(".daybook-preferences.json")),
+    )
+).expanduser()
+
+
+def _capture_mode_active() -> bool:
+    return st.query_params.get("daybook_capture") == "1"
+
+
+def _persist_appearance_mode() -> None:
+    if _capture_mode_active():
+        return
+    try:
+        save_appearance_preference(
+            PREFERENCES_PATH,
+            st.session_state.appearance_mode,
+        )
+    except OSError:
+        pass
 
 
 @st.cache_resource
@@ -135,6 +162,9 @@ if "task_flash_message" not in st.session_state:
 
 if "task_view" not in st.session_state:
     st.session_state.task_view = "Overview"
+
+if "appearance_mode" not in st.session_state:
+    st.session_state.appearance_mode = load_appearance_preference(PREFERENCES_PATH)
 
 pending_page = st.session_state.pending_page
 
@@ -1097,6 +1127,199 @@ st.markdown(
 )
 
 
+
+# phase7-5-appearance-switch
+appearance_mode = st.session_state.appearance_mode
+if appearance_mode == "Dark":
+    appearance_palette = {
+        "background": "#0E1117",
+        "secondary": "#1E2530",
+        "text": "#F4F7FA",
+        "border": "#3A4654",
+        "input": "#161B22",
+    }
+else:
+    appearance_palette = {
+        "background": "#FFFFFF",
+        "secondary": "#F3F6F8",
+        "text": "#1F2933",
+        "border": "#D5DCE3",
+        "input": "#FFFFFF",
+    }
+
+# phase7-5-light-dark-component-contrast
+component_surface = (
+    "#F5F7FA" if appearance_mode == "Light" else "#161B22"
+)
+component_surface_hover = (
+    "#E9EEF3" if appearance_mode == "Light" else "#202833"
+)
+component_text = appearance_palette["text"]
+muted_text = "#5B6570" if appearance_mode == "Light" else "#B7C0CA"
+selected_surface = "#DCEFFA" if appearance_mode == "Light" else "#12384A"
+
+appearance_key = appearance_mode.lower()
+st.markdown(
+    f"""
+    <style>
+    :root {{
+        --background-color: {appearance_palette["background"]} !important;
+        --secondary-background-color: {appearance_palette["secondary"]} !important;
+        --text-color: {appearance_palette["text"]} !important;
+        --primary-color: #29B5E8 !important;
+        color-scheme: {appearance_key} !important;
+    }}
+
+    html,
+    body,
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"] {{
+        background-color: var(--background-color) !important;
+        color: var(--text-color) !important;
+    }}
+
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] > div:first-child {{
+        background-color: var(--secondary-background-color) !important;
+        color: var(--text-color) !important;
+    }}
+
+    [data-testid="stHeader"] {{
+        background-color: color-mix(
+            in srgb,
+            var(--background-color) 94%,
+            transparent
+        ) !important;
+    }}
+
+    [data-testid="stVerticalBlockBorderWrapper"],
+    [data-testid="stForm"],
+    [data-testid="stExpander"] {{
+        border-color: {appearance_palette["border"]} !important;
+    }}
+
+    [data-baseweb="input"] > div,
+    [data-baseweb="textarea"] > div,
+    [data-baseweb="select"] > div,
+    [role="listbox"],
+    [role="menu"] {{
+        background-color: {appearance_palette["input"]} !important;
+        color: var(--text-color) !important;
+        border-color: {appearance_palette["border"]} !important;
+    }}
+
+    input,
+    textarea {{
+        color: var(--text-color) !important;
+        caret-color: var(--text-color) !important;
+    }}
+
+    /* Keep Streamlit component text readable in both app appearances. */
+    .stApp,
+    .stApp p,
+    .stApp span,
+    .stApp label,
+    .stApp li,
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] label {{
+        color: {component_text};
+    }}
+
+    .stApp small,
+    .stApp [data-testid="stCaptionContainer"],
+    .stApp [data-testid="stCaptionContainer"] p,
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {{
+        color: {muted_text} !important;
+    }}
+
+    .stApp [data-testid="stButton"] button,
+    .stApp button[kind="secondary"],
+    .stApp button[data-testid="baseButton-secondary"] {{
+        color: {component_text} !important;
+        background: {component_surface} !important;
+        border-color: {appearance_palette["border"]} !important;
+    }}
+
+    .stApp [data-testid="stButton"] button:hover,
+    .stApp button[kind="secondary"]:hover,
+    .stApp button[data-testid="baseButton-secondary"]:hover {{
+        color: {component_text} !important;
+        background: {component_surface_hover} !important;
+        border-color: #29B5E8 !important;
+    }}
+
+    .stApp [data-testid="stButton"] button p,
+    .stApp [data-testid="stButton"] button span,
+    .stApp button[kind="secondary"] p,
+    .stApp button[kind="secondary"] span {{
+        color: {component_text} !important;
+    }}
+
+    [data-testid="stSidebar"] [role="radiogroup"] label,
+    [data-testid="stSidebar"] [role="radiogroup"] label p,
+    [data-testid="stSidebar"] [role="radiogroup"] label span {{
+        color: {component_text} !important;
+    }}
+
+    [data-testid="stSidebar"] .st-key-app_navigation
+    label:has(input:checked) {{
+        background: {selected_surface} !important;
+        color: {component_text} !important;
+    }}
+
+    [data-testid="stSidebar"] .st-key-app_navigation
+    label:has(input:checked) p,
+    [data-testid="stSidebar"] .st-key-app_navigation
+    label:has(input:checked) span {{
+        color: {component_text} !important;
+    }}
+
+    .stApp [role="tab"],
+    .stApp [role="tab"] p,
+    .stApp [data-testid="stExpander"] summary,
+    .stApp [data-testid="stExpander"] summary p,
+    .stApp [data-baseweb="select"] *,
+    .stApp [data-baseweb="input"] *,
+    .stApp [data-baseweb="textarea"] * {{
+        color: {component_text} !important;
+    }}
+
+    .daybook-theme-marker {{
+        display: none !important;
+    }}
+
+    .st-key-sidebar_appearance {{
+        position: absolute !important;
+        left: .9rem;
+        right: .9rem;
+        bottom: 5.7rem;
+        z-index: 21;
+        padding: .45rem .6rem .55rem .6rem;
+        border: 1px solid {appearance_palette["border"]};
+        border-radius: .55rem;
+        background: var(--secondary-background-color);
+    }}
+
+    .st-key-sidebar_appearance [role="radiogroup"] {{
+        display: flex;
+        gap: .8rem;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f'<span class="daybook-theme-marker" '
+    f'data-daybook-theme="{appearance_key}" '
+    f'aria-hidden="true"></span>',
+    unsafe_allow_html=True,
+)
+
 # phase7-5-sidebar-shutdown-bottom
 st.markdown(
     """
@@ -1106,7 +1329,7 @@ st.markdown(
     }
 
     [data-testid="stSidebar"] > div:first-child {
-        padding-bottom: 5.75rem;
+        padding-bottom: 10.5rem;
     }
 
     .st-key-sidebar_shutdown {
@@ -1171,6 +1394,17 @@ with st.sidebar:
     st.caption("Local-first · No telemetry")
     st.caption("Rules determine · AI explains/proposes · You approve")
     st.caption(f"Backend: {detected_backend}")
+
+    with st.container(key="sidebar_appearance"):
+        st.caption("Appearance")
+        st.radio(
+            "Appearance",
+            ["Light", "Dark"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="appearance_mode",
+            on_change=_persist_appearance_mode,
+        )
 
     if page != st.session_state.page:
         st.session_state.page = page

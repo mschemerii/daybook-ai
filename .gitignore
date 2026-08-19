@@ -7,3 +7,7 @@ data/*.db
 .DS_Store
 models/*.gguf
 tools/
+.daybook-runtime.json
+.daybook-runtime.json.tmp
+.daybook-preferences.json
+.daybook-preferences.json.tmp
