@@ -17,9 +17,9 @@ def navigate(
     frame: FrameLocator,
     page_name: str,
 ) -> None:
-    """Click Streamlit's visible radio label rather than its hidden input."""
+    """Click the visible application-navigation radio label."""
     navigation = frame.locator(
-        '.st-key-top_navigation [role="radiogroup"]'
+        '.st-key-app_navigation [role="radiogroup"]'
     )
 
     navigation.wait_for(

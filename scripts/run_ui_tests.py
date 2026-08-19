@@ -101,6 +101,14 @@ def request_shutdown(token: str) -> None:
 def main() -> int:
     args = parse_arguments()
 
+    if url_ready(CONTROLLER_URL) or url_ready(STREAMLIT_URL):
+        print(
+            "Daybook AI is already using port 8500 or 8501. "
+            "Run `python run.py --stop` before the UI test suite.",
+            file=sys.stderr,
+        )
+        return 2
+
     with tempfile.TemporaryDirectory(
         prefix="daybook-ui-tests-"
     ) as temporary_directory:

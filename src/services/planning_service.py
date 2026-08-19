@@ -344,6 +344,34 @@ class PlanningService:
             },
         }
 
+    @staticmethod
+    def _restore_application_owned_decomposition_envelope(
+        raw: str,
+        *,
+        parent_task_id: int,
+        proposal_id: str,
+    ) -> str:
+        """Keep application-owned proposal identity out of the model's authority."""
+        try:
+            value = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return raw
+        if not isinstance(value, dict):
+            return raw
+        value = {
+            **value,
+            "proposal_type": PROPOSAL_TYPE,
+            "parent_task_id": parent_task_id,
+            "proposal_id": proposal_id,
+            "requires_confirmation": True,
+        }
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
     def request_decomposition(
         self,
         task: Task,
@@ -384,6 +412,11 @@ class PlanningService:
         raw = self.model.propose_decomposition(
             contract,
             resolved_model=resolved_model,
+        )
+        raw = self._restore_application_owned_decomposition_envelope(
+            raw,
+            parent_task_id=int(task.id),
+            proposal_id=proposal_id,
         )
         validated = self.validate_decomposition_response(
             raw,

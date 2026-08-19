@@ -47,7 +47,7 @@ BASELINE_COLUMNS = {
     ),
 }
 
-V09_TABLES = BASELINE_TABLES | {
+V09_PHASE2_TABLES = BASELINE_TABLES | {
     "schema_migrations",
     "task_dependencies",
     "time_entries",
@@ -55,6 +55,10 @@ V09_TABLES = BASELINE_TABLES | {
     "proposal_task_links",
     "reporting_settings",
     "task_deletion_audit",
+}
+
+V09_TABLES = V09_PHASE2_TABLES | {
+    "task_clarification_answers",
 }
 
 V09_TASK_COLUMNS = BASELINE_COLUMNS["tasks"] + (
@@ -259,9 +263,30 @@ def _upgrade_to_v09(conn: sqlite3.Connection) -> None:
     _execute_statements(conn, V09_STATEMENTS)
 
 
+V09_PHASE7_5_STATEMENTS = (
+    """
+    CREATE TABLE task_clarification_answers (
+        task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+        answers_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+)
+
+
+def _upgrade_to_v09_phase7_5(conn: sqlite3.Connection) -> None:
+    _execute_statements(conn, V09_PHASE7_5_STATEMENTS)
+
+
 MIGRATIONS = (
     Migration(1, "v0.8 baseline", _create_baseline),
     Migration(2, "v0.9 migration and repository foundation", _upgrade_to_v09),
+    Migration(
+        3,
+        "v0.9 Phase 7.5 durable task clarification answers",
+        _upgrade_to_v09_phase7_5,
+    ),
 )
 
 
@@ -291,10 +316,14 @@ def _matches_versioned_baseline(conn: sqlite3.Connection) -> bool:
     return all(_columns(conn, table) == columns for table, columns in BASELINE_COLUMNS.items())
 
 
-def _validate_v09(conn: sqlite3.Connection) -> None:
+def _validate_v09(
+    conn: sqlite3.Connection,
+    version: int | None = None,
+) -> None:
     tables = _table_names(conn)
-    missing = V09_TABLES - tables
-    unexpected = tables - V09_TABLES
+    expected_tables = V09_PHASE2_TABLES if version == 2 else V09_TABLES
+    missing = expected_tables - tables
+    unexpected = tables - expected_tables
     if missing or unexpected or _columns(conn, "tasks") != V09_TASK_COLUMNS:
         details = []
         if missing:
@@ -364,7 +393,7 @@ def migrate(
         if max(applied) == 1 and not _matches_versioned_baseline(conn):
             raise MigrationError("Version 1 database structure does not match the v0.8 baseline")
         if max(applied) >= 2:
-            _validate_v09(conn)
+            _validate_v09(conn, max(applied))
 
     pending = [migration for migration in migrations if migration.version not in applied]
     needs_v09 = any(migration.version >= 2 for migration in pending)
@@ -402,7 +431,7 @@ def migrate(
                 continue
             migration.apply(conn)
             _record_migration(conn, migration)
-        _validate_v09(conn)
+        _validate_v09(conn, max(versions))
         conn.commit()
     except Exception:
         conn.rollback()

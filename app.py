@@ -19,6 +19,10 @@ from src.repositories.planning_repository import PlanningRepository
 from src.repositories.planning_repository import ApprovalIntegrityError
 from src.repositories.task_repository import TaskRepository
 from src.repositories.time_entry_repository import TimeEntryRepository
+from src.runtime.preferences import (
+    load_appearance_preference,
+    save_appearance_preference,
+)
 from src.services.context_service import ContextService
 from src.services.planning_service import (
     Phase6ValidationError,
@@ -45,7 +49,7 @@ from src.ui.components import format_estimated_hours, page_header, task_card
 from src.utils.dates import format_date, format_datetime
 
 load_dotenv()
-st.set_page_config(page_title="Daybook AI", page_icon="📘", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Daybook AI", page_icon="📘", layout="wide", initial_sidebar_state="expanded")
 
 DB_PATH = Path(os.getenv("DAYBOOK_DB_PATH", "data/daybook.db"))
 MODEL_BASE_URL = os.getenv("DAYBOOK_MODEL_BASE_URL", "http://127.0.0.1:8080/v1")
@@ -54,6 +58,29 @@ MODEL_API_KEY = os.getenv("DAYBOOK_MODEL_API_KEY", "")
 CONTROLLER_URL = os.getenv("DAYBOOK_CONTROLLER_URL", "http://127.0.0.1:8500")
 CONTROLLER_TOKEN = os.getenv("DAYBOOK_CONTROLLER_TOKEN", "")
 PAGES = ["Today", "Tasks", "Daily Journal", "Assistant", "About", "Ethical AI"]
+
+PREFERENCES_PATH = Path(
+    os.getenv(
+        "DAYBOOK_PREFERENCES_PATH",
+        str(Path(__file__).resolve().with_name(".daybook-preferences.json")),
+    )
+).expanduser()
+
+
+def _capture_mode_active() -> bool:
+    return st.query_params.get("daybook_capture") == "1"
+
+
+def _persist_appearance_mode() -> None:
+    if _capture_mode_active():
+        return
+    try:
+        save_appearance_preference(
+            PREFERENCES_PATH,
+            st.session_state.appearance_mode,
+        )
+    except OSError:
+        pass
 
 
 @st.cache_resource
@@ -133,6 +160,12 @@ if "breakdown_approval_result" not in st.session_state:
 if "task_flash_message" not in st.session_state:
     st.session_state.task_flash_message = None
 
+if "task_view" not in st.session_state:
+    st.session_state.task_view = "Overview"
+
+if "appearance_mode" not in st.session_state:
+    st.session_state.appearance_mode = load_appearance_preference(PREFERENCES_PATH)
+
 pending_page = st.session_state.pending_page
 
 if pending_page is not None:
@@ -146,6 +179,16 @@ elif "navigation_radio" not in st.session_state:
 def open_task(task_id: int) -> None:
     """Queue navigation to the selected task on the next rerun."""
     st.session_state.selected_task_id = task_id
+    st.session_state.pending_page = "Tasks"
+
+
+def open_task_view(view: str) -> None:
+    """Open Tasks in one of the bounded dashboard/list views."""
+    valid_views = {"Overview", "Open", "Due today", "Blocked", "Completed"}
+    if view not in valid_views:
+        raise ValueError(f"Unknown task view: {view}")
+    st.session_state.task_view = view
+    st.session_state.selected_task_id = None
     st.session_state.pending_page = "Tasks"
 
 
@@ -197,50 +240,79 @@ def render_breakdown_planning(task) -> None:
             "reviewable tasks is strongly recommended, but remains optional."
         )
 
+    saved_answers = planning.get_clarification_answers(int(task.id))
     active = st.session_state.breakdown_task_id == task.id
     if not active and st.button(
         "Request Breakdown",
         key=f"request_breakdown_{task.id}",
     ):
         st.session_state.breakdown_task_id = task.id
-        st.session_state.breakdown_answers = {}
+        st.session_state.breakdown_answers = dict(saved_answers)
         st.session_state.breakdown_result = None
         st.session_state.breakdown_error = ""
         st.rerun()
     if not active:
-        st.caption(
-            "Any task may be submitted manually. This does not change its "
-            "deterministic classification or create subtasks."
-        )
+        if saved_answers:
+            st.caption(
+                "Clarification answers are saved locally for this task and will "
+                "be restored when breakdown planning is reopened."
+            )
+        else:
+            st.caption(
+                "Any task may be submitted manually. This does not change its "
+                "deterministic classification or create subtasks."
+            )
         return
 
-    answers = dict(st.session_state.breakdown_answers)
+    answers = dict(saved_answers)
+    st.session_state.breakdown_answers = dict(answers)
     readiness = planning_service.readiness(task, answers)
+    clarification_questions = planning_service.readiness(task, {}).questions
+
     if not readiness.ready:
         st.info(
             "More information is needed before an approval-ready proposal can "
             "be requested. No answers will be invented."
         )
+
+    if clarification_questions:
         with st.form(f"breakdown_clarification_{task.id}"):
             pending_answers = {}
-            for field, question in readiness.questions:
+            for field, question in clarification_questions:
                 pending_answers[field] = st.text_area(
                     question,
                     value=answers.get(field, ""),
                     key=f"breakdown_{task.id}_{field}",
                     max_chars=DESCRIPTION_MAX_LENGTH,
                 )
-            if st.form_submit_button("Save clarification answers"):
-                answers.update(
-                    {
-                        key: value.strip()
-                        for key, value in pending_answers.items()
-                        if value.strip()
-                    }
+            submit_label = (
+                "Update clarification answers"
+                if saved_answers
+                else "Save clarification answers"
+            )
+            if st.form_submit_button(submit_label):
+                updated_answers = dict(answers)
+                for field, value in pending_answers.items():
+                    cleaned = value.strip()
+                    if cleaned:
+                        updated_answers[field] = cleaned
+                    else:
+                        updated_answers.pop(field, None)
+                persisted_answers = planning.save_clarification_answers(
+                    int(task.id),
+                    updated_answers,
                 )
-                st.session_state.breakdown_answers = answers
+                st.session_state.breakdown_answers = dict(persisted_answers)
                 st.session_state.breakdown_error = ""
                 st.rerun()
+
+        if saved_answers:
+            st.caption(
+                "Clarification answers are saved in the local Daybook SQLite "
+                "database for this task. Use Update clarification answers to change them."
+            )
+
+    if not readiness.ready:
         st.caption(
             "An approval-ready or SQLite-ready proposal will not be generated "
             "while material context is missing."
@@ -502,14 +574,26 @@ def render_breakdown_planning(task) -> None:
                 max_value=float(STANDARD_ESTIMATE_MAX_HOURS), step=0.25,
                 value=0.25, key=f"manual_estimate_{proposal.proposal_id}",
             )
+            manual_prerequisite_keys = st.multiselect(
+                "Manual task prerequisites",
+                list(names),
+                format_func=lambda key: f"{names.get(key, key)} [{key}]",
+                key=f"manual_prerequisites_{proposal.proposal_id}",
+            )
             if st.form_submit_button("Insert task"):
                 try:
-                    planning_service.add_review_item(
+                    updated_review = planning_service.add_review_item(
                         proposal.proposal_id,
                         title=manual_title,
                         description=manual_description,
                         completion_criterion=manual_completion,
                         estimated_hours=manual_estimate,
+                    )
+                    manual_item = updated_review.items[-1]
+                    planning_service.set_review_prerequisites(
+                        proposal.proposal_id,
+                        manual_item.item_key,
+                        manual_prerequisite_keys,
                     )
                     st.rerun()
                 except Phase7ValidationError as exc:
@@ -575,7 +659,12 @@ def navigate_to(page_name: str) -> None:
         st.session_state.selected_task_id = None
 
 
-def render_task_hierarchy(task, *, depth: int = 0) -> None:
+def render_task_hierarchy(
+    task,
+    *,
+    depth: int = 0,
+    show_children: bool = True,
+) -> None:
     if depth:
         st.caption(f"{'↳ ' * depth}Task in the epic above")
     task_card(
@@ -584,8 +673,24 @@ def render_task_hierarchy(task, *, depth: int = 0) -> None:
         key_prefix=f"all_level_{depth}",
         blocking_prerequisites=task_service.blocking_prerequisites(task.id),
     )
-    for child in tasks.list_subtasks(task.id):
-        render_task_hierarchy(child, depth=depth + 1)
+
+    children = tasks.list_subtasks(task.id)
+    if children and depth == 0 and not show_children:
+        completed_children = sum(
+            child.status == "Completed" for child in children
+        )
+        st.caption(
+            f"Epic · {completed_children} of {len(children)} tasks complete · "
+            "Open the epic to view ordered tasks and prerequisites."
+        )
+        return
+
+    for child in children:
+        render_task_hierarchy(
+            child,
+            depth=depth + 1,
+            show_children=show_children,
+        )
 
 
 def render_epic_tasks(epic, children) -> None:
@@ -717,50 +822,122 @@ def render_epic_tasks(epic, children) -> None:
 st.markdown(
     """
 <style>
-.block-container {padding-top: 2.6rem; padding-bottom: 2rem; max-width: 1120px;}
-[data-testid="stSidebar"], [data-testid="collapsedControl"] {display: none;}
+.block-container {
+    padding-top: 1.15rem;
+    padding-bottom: 2rem;
+    max-width: 1480px;
+}
+[data-testid="stSidebar"] {
+    border-right: 1px solid color-mix(in srgb, var(--text-color) 14%, transparent);
+    background: color-mix(
+        in srgb,
+        var(--secondary-background-color) 76%,
+        var(--background-color)
+    );
+}
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: .9rem;
+    display:flex;
+    flex-direction:column;
+    min-height:100vh;
+}
+.st-key-sidebar_shutdown {
+    margin-top:auto;
+    padding-bottom:.75rem;
+}
+.st-key-sidebar_brand {
+    padding: .2rem .35rem .8rem .35rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
+    margin-bottom: .55rem;
+}
+.sidebar-brand-title {
+    font-size: 1.08rem;
+    font-weight: 760;
+    line-height: 1.2;
+    margin: 0;
+}
+.sidebar-brand-subtitle {
+    font-size: .76rem;
+    opacity: .72;
+    margin-top: .15rem;
+}
+.st-key-app_navigation [role="radiogroup"] {
+    display:flex;
+    flex-direction:column;
+    gap:.2rem;
+}
+.st-key-app_navigation label {
+    width:100%;
+    padding:.42rem .55rem;
+    border:1px solid transparent;
+    border-radius:.5rem;
+}
+.st-key-app_navigation label:hover {
+    background:color-mix(
+        in srgb,
+        #0072B2 8%,
+        var(--secondary-background-color)
+    );
+}
+.st-key-app_navigation label:has(input:checked) {
+    border-color:color-mix(in srgb, #0072B2 55%, transparent);
+    background:color-mix(
+        in srgb,
+        #0072B2 13%,
+        var(--secondary-background-color)
+    );
+    font-weight:700;
+}
 .st-key-top_navigation {
-    position: sticky;
-    top: 2.25rem;
-    z-index: 999;
-    background: var(--background-color);
-    padding: .8rem 0 .7rem 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--text-color) 18%, transparent);
+    position:sticky;
+    top:0;
+    z-index:999;
+    background:color-mix(in srgb, var(--background-color) 94%, transparent);
+    backdrop-filter:blur(14px);
+    padding:.2rem 0 .55rem 0;
+    border-bottom:1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
+    margin-bottom:.8rem;
 }
-.st-key-top_navigation [role="radiogroup"] {gap: .25rem; flex-wrap: wrap;}
-.st-key-top_navigation label {
-    border: 1px solid color-mix(in srgb, var(--text-color) 22%, transparent);
-    border-radius: .55rem;
-    padding: .25rem .6rem;
-    background: var(--secondary-background-color);
+.topbar-kicker {
+    font-size:.7rem;
+    font-weight:700;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    opacity:.64;
 }
-.st-key-top_navigation label:has(input:checked) {
-    border-width: 2px;
-    border-color: #0072B2;
+.topbar-title {
+    font-size:1.08rem;
+    font-weight:760;
+    line-height:1.2;
+    margin-top:.05rem;
+}
+.topbar-runtime {
+    font-size:.72rem;
+    opacity:.68;
+    margin-top:.12rem;
 }
 .shutdown-link-wrap {
     display:flex;
     justify-content:flex-end;
     align-items:center;
-    padding-top:.2rem;
+    height:100%;
 }
 .shutdown-link {
     display:inline-flex;
-    width:100%;
-    min-height:2.45rem;
+    min-height:2.2rem;
     align-items:center;
     justify-content:center;
-    border-radius:.55rem;
-    border:1px solid color-mix(in srgb, #D55E00 70%, var(--text-color));
+    border-radius:.5rem;
+    border:1px solid color-mix(in srgb, #D55E00 58%, var(--text-color));
     color:var(--text-color) !important;
-    background:color-mix(in srgb, #D55E00 12%, var(--background-color));
+    background:color-mix(in srgb, #D55E00 9%, var(--background-color));
     font-weight:650;
     text-decoration:none !important;
-    padding:.45rem .75rem;
+    padding:.35rem .7rem;
 }
 .shutdown-link:hover {
     border-color:#D55E00;
-    background:color-mix(in srgb, #D55E00 20%, var(--background-color));
+    background:color-mix(in srgb, #D55E00 16%, var(--background-color));
 }
 .task-card-title {
     margin:0 0 .35rem 0;
@@ -849,50 +1026,409 @@ st.markdown(
     border-radius:.2rem;
 }
 [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {color:var(--text-color);}
+.st-key-task_index_controls {
+    margin:.15rem 0 .75rem 0;
+    padding:.45rem .65rem;
+    border:1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
+    border-radius:.65rem;
+    background:color-mix(
+        in srgb,
+        var(--secondary-background-color) 72%,
+        var(--background-color)
+    );
+}
+.st-key-task_index_controls [data-testid="stHorizontalBlock"] {
+    align-items:center;
+}
+.st-key-today_summary_metrics [data-testid="stButton"] button {
+    min-height:4.9rem;
+    justify-content:flex-start;
+    text-align:left;
+    white-space:pre-line;
+    padding:.65rem .8rem;
+    cursor:pointer;
+    border:1px solid color-mix(in srgb, var(--text-color) 28%, transparent);
+    border-radius:.6rem;
+    background:color-mix(
+        in srgb,
+        var(--secondary-background-color) 74%,
+        var(--background-color)
+    );
+    box-shadow:0 1px 0 color-mix(in srgb, var(--text-color) 8%, transparent);
+    transition:
+        border-color .12s ease,
+        transform .12s ease,
+        background .12s ease,
+        box-shadow .12s ease;
+}
+.st-key-today_summary_metrics [data-testid="stButton"] button:hover {
+    border-color:color-mix(in srgb, #29B5E8 78%, var(--text-color));
+    background:color-mix(
+        in srgb,
+        var(--secondary-background-color) 90%,
+        var(--background-color)
+    );
+    box-shadow:0 0 0 1px color-mix(in srgb, #29B5E8 22%, transparent);
+    transform:translateY(-1px);
+}
+.st-key-today_summary_metrics [data-testid="stButton"] button:focus-visible {
+    outline:2px solid color-mix(in srgb, #29B5E8 75%, white);
+    outline-offset:2px;
+}
+.st-key-today_summary_metrics [data-testid="stButton"] button p {
+    white-space:pre-line;
+    line-height:1.35;
+    font-size:1rem;
+    font-weight:700;
+}
+.st-key-today_workspace,
+.st-key-journal_workspace,
+.st-key-assistant_workspace,
+.st-key-about_workspace,
+.st-key-ethical_workspace {
+    margin-top:.35rem;
+}
+.st-key-today_workspace [data-testid="stHorizontalBlock"],
+.st-key-journal_workspace [data-testid="stHorizontalBlock"],
+.st-key-assistant_workspace [data-testid="stHorizontalBlock"],
+.st-key-about_workspace [data-testid="stHorizontalBlock"],
+.st-key-ethical_workspace [data-testid="stHorizontalBlock"] {
+    gap:1rem;
+}
+.st-key-task_index_grid { margin-top:.25rem; }
+[data-baseweb="tab-list"] { gap:.15rem; margin-bottom:.45rem; }
+[role="tab"] { min-height:2.4rem; padding:.35rem .7rem; }
+.block-container h1 { font-size:1.72rem; line-height:1.2; padding-bottom:.08rem; }
+.block-container h2 { font-size:1.22rem; line-height:1.25; }
+.block-container h3 { font-size:1.02rem; }
+@media (max-width: 900px) {
+    .st-key-task_index_grid > div > [data-testid="stHorizontalBlock"],
+    .st-key-today_workspace > div > [data-testid="stHorizontalBlock"],
+    .st-key-journal_workspace > div > [data-testid="stHorizontalBlock"],
+    .st-key-assistant_workspace > div > [data-testid="stHorizontalBlock"],
+    .st-key-about_workspace > div > [data-testid="stHorizontalBlock"],
+    .st-key-ethical_workspace > div > [data-testid="stHorizontalBlock"] {
+        flex-wrap:wrap;
+    }
+    .st-key-task_index_grid > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-today_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-journal_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-assistant_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-about_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-ethical_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        min-width:100%;
+        flex-basis:100%;
+    }
+}
 .small-note {font-size:.85rem; color:var(--text-color); opacity:.86;}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-with st.container(key="top_navigation"):
-    detected_gpu = os.getenv(
-        "DAYBOOK_DETECTED_GPU",
-        "Not checked—start with python run.py",
-    )
-    detected_backend = os.getenv(
-        "DAYBOOK_DETECTED_BACKEND",
-        "Unknown",
-    )
 
-    title_column, shutdown_column = st.columns(
-        [9, 2],
-        vertical_alignment="center",
-    )
 
-    with title_column:
-        st.markdown("### Daybook AI")
-        st.caption(
-            "Local-first prototype · No telemetry · "
-            f"Runtime: {detected_gpu} · Backend: {detected_backend}"
+# phase7-5-appearance-switch
+appearance_mode = st.session_state.appearance_mode
+if appearance_mode == "Dark":
+    appearance_palette = {
+        "background": "#0E1117",
+        "secondary": "#1E2530",
+        "text": "#F4F7FA",
+        "border": "#3A4654",
+        "input": "#161B22",
+    }
+else:
+    appearance_palette = {
+        "background": "#FFFFFF",
+        "secondary": "#F3F6F8",
+        "text": "#1F2933",
+        "border": "#D5DCE3",
+        "input": "#FFFFFF",
+    }
+
+# phase7-5-light-dark-component-contrast
+component_surface = (
+    "#F5F7FA" if appearance_mode == "Light" else "#161B22"
+)
+component_surface_hover = (
+    "#E9EEF3" if appearance_mode == "Light" else "#202833"
+)
+component_text = appearance_palette["text"]
+muted_text = "#5B6570" if appearance_mode == "Light" else "#B7C0CA"
+selected_surface = "#DCEFFA" if appearance_mode == "Light" else "#12384A"
+
+appearance_key = appearance_mode.lower()
+st.markdown(
+    f"""
+    <style>
+    :root {{
+        --background-color: {appearance_palette["background"]} !important;
+        --secondary-background-color: {appearance_palette["secondary"]} !important;
+        --text-color: {appearance_palette["text"]} !important;
+        --primary-color: #29B5E8 !important;
+        color-scheme: {appearance_key} !important;
+    }}
+
+    html,
+    body,
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"] {{
+        background-color: var(--background-color) !important;
+        color: var(--text-color) !important;
+    }}
+
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] > div:first-child {{
+        background-color: var(--secondary-background-color) !important;
+        color: var(--text-color) !important;
+    }}
+
+    [data-testid="stHeader"] {{
+        background-color: color-mix(
+            in srgb,
+            var(--background-color) 94%,
+            transparent
+        ) !important;
+    }}
+
+    [data-testid="stVerticalBlockBorderWrapper"],
+    [data-testid="stForm"],
+    [data-testid="stExpander"] {{
+        border-color: {appearance_palette["border"]} !important;
+    }}
+
+    [data-baseweb="input"] > div,
+    [data-baseweb="textarea"] > div,
+    [data-baseweb="select"] > div,
+    [role="listbox"],
+    [role="menu"] {{
+        background-color: {appearance_palette["input"]} !important;
+        color: var(--text-color) !important;
+        border-color: {appearance_palette["border"]} !important;
+    }}
+
+    input,
+    textarea {{
+        color: var(--text-color) !important;
+        caret-color: var(--text-color) !important;
+    }}
+
+    /* Keep Streamlit component text readable in both app appearances. */
+    .stApp,
+    .stApp p,
+    .stApp span,
+    .stApp label,
+    .stApp li,
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] label {{
+        color: {component_text};
+    }}
+
+    .stApp small,
+    .stApp [data-testid="stCaptionContainer"],
+    .stApp [data-testid="stCaptionContainer"] p,
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {{
+        color: {muted_text} !important;
+    }}
+
+    .stApp [data-testid="stButton"] button,
+    .stApp button[kind="secondary"],
+    .stApp button[data-testid="baseButton-secondary"] {{
+        color: {component_text} !important;
+        background: {component_surface} !important;
+        border-color: {appearance_palette["border"]} !important;
+    }}
+
+    .stApp [data-testid="stButton"] button:hover,
+    .stApp button[kind="secondary"]:hover,
+    .stApp button[data-testid="baseButton-secondary"]:hover {{
+        color: {component_text} !important;
+        background: {component_surface_hover} !important;
+        border-color: #29B5E8 !important;
+    }}
+
+    .stApp [data-testid="stButton"] button p,
+    .stApp [data-testid="stButton"] button span,
+    .stApp button[kind="secondary"] p,
+    .stApp button[kind="secondary"] span {{
+        color: {component_text} !important;
+    }}
+
+    [data-testid="stSidebar"] [role="radiogroup"] label,
+    [data-testid="stSidebar"] [role="radiogroup"] label p,
+    [data-testid="stSidebar"] [role="radiogroup"] label span {{
+        color: {component_text} !important;
+    }}
+
+    [data-testid="stSidebar"] .st-key-app_navigation
+    label:has(input:checked) {{
+        background: {selected_surface} !important;
+        color: {component_text} !important;
+    }}
+
+    [data-testid="stSidebar"] .st-key-app_navigation
+    label:has(input:checked) p,
+    [data-testid="stSidebar"] .st-key-app_navigation
+    label:has(input:checked) span {{
+        color: {component_text} !important;
+    }}
+
+    .stApp [role="tab"],
+    .stApp [role="tab"] p,
+    .stApp [data-testid="stExpander"] summary,
+    .stApp [data-testid="stExpander"] summary p,
+    .stApp [data-baseweb="select"] *,
+    .stApp [data-baseweb="input"] *,
+    .stApp [data-baseweb="textarea"] * {{
+        color: {component_text} !important;
+    }}
+
+    .daybook-theme-marker {{
+        display: none !important;
+    }}
+
+    .st-key-sidebar_appearance {{
+        position: absolute !important;
+        left: .9rem;
+        right: .9rem;
+        bottom: 5.7rem;
+        z-index: 21;
+        padding: .45rem .6rem .55rem .6rem;
+        border: 1px solid {appearance_palette["border"]};
+        border-radius: .55rem;
+        background: var(--secondary-background-color);
+    }}
+
+    .st-key-sidebar_appearance [role="radiogroup"] {{
+        display: flex;
+        gap: .8rem;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f'<span class="daybook-theme-marker" '
+    f'data-daybook-theme="{appearance_key}" '
+    f'aria-hidden="true"></span>',
+    unsafe_allow_html=True,
+)
+
+# phase7-5-sidebar-shutdown-bottom
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"] {
+        position: relative;
+    }
+
+    [data-testid="stSidebar"] > div:first-child {
+        padding-bottom: 10.5rem;
+    }
+
+    .st-key-sidebar_shutdown {
+        position: absolute !important;
+        left: .9rem;
+        right: .9rem;
+        bottom: 1rem;
+        margin-top: 0 !important;
+        padding: .7rem 0 0 0 !important;
+        border-top: 1px solid color-mix(
+            in srgb,
+            var(--text-color) 16%,
+            transparent
+        );
+        background: color-mix(
+            in srgb,
+            var(--secondary-background-color) 96%,
+            var(--background-color)
+        );
+        z-index: 20;
+    }
+
+    .st-key-sidebar_shutdown .shutdown-link-wrap {
+        justify-content: stretch !important;
+    }
+
+    .st-key-sidebar_shutdown .shutdown-link {
+        width: 100% !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+detected_gpu = os.getenv(
+    "DAYBOOK_DETECTED_GPU",
+    "Not checked—start with python run.py",
+)
+detected_backend = os.getenv(
+    "DAYBOOK_DETECTED_BACKEND",
+    "Unknown",
+)
+
+with st.sidebar:
+    with st.container(key="sidebar_brand"):
+        st.markdown(
+            """
+            <div class="sidebar-brand-title">📘 Daybook AI</div>
+            <div class="sidebar-brand-subtitle">Your local work companion</div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    with shutdown_column:
-        shutdown_query = urlencode({"token": CONTROLLER_TOKEN})
-        shutdown_url = escape(
-            f"{CONTROLLER_URL.rstrip('/')}/shutdown?{shutdown_query}",
-            quote=True,
+    with st.container(key="app_navigation"):
+        page = st.radio(
+            "Primary navigation",
+            PAGES,
+            label_visibility="collapsed",
+            key="navigation_radio",
         )
 
+    st.caption("Local-first · No telemetry")
+    st.caption("Rules determine · AI explains/proposes · You approve")
+    st.caption(f"Backend: {detected_backend}")
+
+    with st.container(key="sidebar_appearance"):
+        st.caption("Appearance")
+        st.radio(
+            "Appearance",
+            ["Light", "Dark"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="appearance_mode",
+            on_change=_persist_appearance_mode,
+        )
+
+    if page != st.session_state.page:
+        st.session_state.page = page
+        if page != "Tasks":
+            st.session_state.selected_task_id = None
+        st.rerun()
+
+
+    shutdown_query = urlencode({"token": CONTROLLER_TOKEN})
+    shutdown_url = escape(
+        f"{CONTROLLER_URL.rstrip('/')}/shutdown?{shutdown_query}",
+        quote=True,
+    )
+    with st.container(key="sidebar_shutdown"):
         st.markdown(
             f"""
-            <div class="shutdown-link-wrap">
+            <div class="shutdown-link-wrap" style="justify-content:flex-start;">
                 <a
                     class="shutdown-link"
                     href="{shutdown_url}"
                     target="_top"
                     aria-label="Shut down Daybook AI"
                     title="Close Daybook AI and stop locally started services"
+                    style="width:100%;"
                 >
                     ⏻ Shut down
                 </a>
@@ -901,19 +1437,17 @@ with st.container(key="top_navigation"):
             unsafe_allow_html=True,
         )
 
-    page = st.radio(
-        "Primary navigation",
-        PAGES,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="navigation_radio",
+with st.container(key="top_navigation"):
+    st.markdown(
+        f"""
+        <div class="topbar-kicker">Daybook AI</div>
+        <div class="topbar-title">{escape(st.session_state.page)}</div>
+        <div class="topbar-runtime">
+            Runtime: {escape(detected_gpu)} · Backend: {escape(detected_backend)}
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-
-    if page != st.session_state.page:
-        st.session_state.page = page
-        if page != "Tasks":
-            st.session_state.selected_task_id = None
-        st.rerun()
 
 
 page = st.session_state.page
@@ -962,95 +1496,143 @@ if page == "Today":
     blocked = task_service.blocked()
     due = task_service.due_today()
     completed = task_service.completed()
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Open tasks", len(open_tasks))
-    c2.metric("Due today", len(due))
-    c3.metric("Blockers", len(blocked))
-    c4.metric("Completed", len(completed))
 
-    st.subheader("Recommended focus")
-    st.caption("Selected by application rules. The local AI may explain the result, but it does not set the order.")
-    focus = task_service.focus_items()
-    if not focus:
-        st.info("No open, unblocked tasks are available.")
-    for position, task in enumerate(focus, start=1):
-        facts = task_service.ranking_facts(task, position)
-        task_card(task, facts.deterministic_explanation, open_task, "focus")
-        with st.expander(
-            f"Deterministic ranking facts · calculated position {position}",
-            expanded=False,
-        ):
-            st.json(facts.to_dict())
-            st.caption(
-                "User-assigned priority is an input. The calculated focus "
-                "position is the application-rule result."
-            )
-        stored_explanation = st.session_state.ranking_ai_explanations.get(task.id)
-        if (
-            stored_explanation is not None
-            and stored_explanation["facts"] != facts.to_dict()
-        ):
-            del st.session_state.ranking_ai_explanations[task.id]
-            stored_explanation = None
-        action_label = (
-            "Retry AI explanation"
-            if stored_explanation is not None
-            and not stored_explanation["result"].used_ai
-            else "Explain with AI"
+    with st.container(key="today_summary_metrics"):
+        metric_columns = st.columns(4)
+        metric_specs = (
+            ("Open tasks", len(open_tasks), "Open", "open"),
+            ("Due today", len(due), "Due today", "due"),
+            ("Blockers", len(blocked), "Blocked", "blocked"),
+            ("Completed", len(completed), "Completed", "completed"),
         )
-        if st.button(action_label, key=f"explain_focus_{task.id}"):
-            result = planning_service.explain_with_ai(facts)
-            st.session_state.ranking_ai_explanations[task.id] = {
-                "facts": facts.to_dict(),
-                "result": result,
-            }
-            st.rerun()
-        stored_explanation = st.session_state.ranking_ai_explanations.get(task.id)
-        if stored_explanation is not None:
-            result = stored_explanation["result"]
-            if result.used_ai:
-                st.markdown("**Untrusted local AI explanation**")
-                st.text(result.text)
-            else:
-                st.info(result.message)
-                st.markdown("**Deterministic fallback**")
-                st.text(result.text)
+        for column, (label, count, view, key_suffix) in zip(
+            metric_columns,
+            metric_specs,
+        ):
+            with column:
+                if st.button(
+                    f"{count}\n{label}",
+                    key=f"today_metric_{key_suffix}",
+                    use_container_width=True,
+                    help=f"Open the {view.lower()} task view.",
+                ):
+                    open_task_view(view)
+                    st.rerun()
 
-    st.subheader("Due today")
-    if due:
-        for task in due:
-            task_card(task, on_open=open_task, key_prefix="due")
-    else:
-        st.info("No tasks are due today.")
+    focus = task_service.focus_items()
+    with st.container(key="today_workspace"):
+        focus_column, activity_column = st.columns([1.65, 1], gap="large")
 
-    st.subheader("Current blockers")
-    if blocked:
-        for task in blocked:
-            task_card(
-                task,
-                on_open=open_task,
-                key_prefix="blocked",
-                blocking_prerequisites=task_service.blocking_prerequisites(
-                    task.id
-                ),
+        with focus_column:
+            st.subheader("Recommended focus")
+            st.caption(
+                "Selected by application rules. The local AI may explain the "
+                "result, but it does not set the order."
             )
-    else:
-        st.info("No blocked tasks.")
+            if not focus:
+                st.info("No open, unblocked tasks are available.")
+            for position, task in enumerate(focus, start=1):
+                facts = task_service.ranking_facts(task, position)
+                task_card(
+                    task,
+                    facts.deterministic_explanation,
+                    open_task,
+                    "focus",
+                )
+                with st.expander(
+                    f"Deterministic ranking facts · calculated position {position}",
+                    expanded=False,
+                ):
+                    st.json(facts.to_dict())
+                    st.caption(
+                        "User-assigned priority is an input. The calculated focus "
+                        "position is the application-rule result."
+                    )
+                stored_explanation = (
+                    st.session_state.ranking_ai_explanations.get(task.id)
+                )
+                if (
+                    stored_explanation is not None
+                    and stored_explanation["facts"] != facts.to_dict()
+                ):
+                    del st.session_state.ranking_ai_explanations[task.id]
+                    stored_explanation = None
 
-    st.subheader("Completed tasks")
-    st.caption("Recently completed work remains visible here. Reopen a task to return it to Open status.")
-    if completed:
-        for task in completed[:10]:
-            task_card(
-                task,
-                on_open=open_task,
-                on_reopen=reopen_task,
-                key_prefix="completed",
-            )
-        if len(completed) > 10:
-            st.caption(f"Showing 10 of {len(completed)} completed tasks. Open the Tasks page and enable Show completed to view all.")
-    else:
-        st.info("No completed tasks yet.")
+                action_label = (
+                    "Retry AI explanation"
+                    if stored_explanation is not None
+                    and not stored_explanation["result"].used_ai
+                    else "Explain with AI"
+                )
+                if st.button(action_label, key=f"explain_focus_{task.id}"):
+                    result = planning_service.explain_with_ai(facts)
+                    st.session_state.ranking_ai_explanations[task.id] = {
+                        "facts": facts.to_dict(),
+                        "result": result,
+                    }
+                    st.rerun()
+
+                stored_explanation = (
+                    st.session_state.ranking_ai_explanations.get(task.id)
+                )
+                if stored_explanation is not None:
+                    result = stored_explanation["result"]
+                    if result.used_ai:
+                        st.markdown("**Untrusted local AI explanation**")
+                        st.text(result.text)
+                    else:
+                        st.info(result.message)
+                        st.markdown("**Deterministic fallback**")
+                        st.text(result.text)
+
+        with activity_column:
+            due_tab, blocker_tab = st.tabs(["Due today", "Blockers"])
+            with due_tab:
+                st.subheader("Due today")
+                if due:
+                    for task in due:
+                        task_card(task, on_open=open_task, key_prefix="due")
+                else:
+                    st.info("No tasks are due today.")
+
+            with blocker_tab:
+                st.subheader("Current blockers")
+                if blocked:
+                    for task in blocked:
+                        task_card(
+                            task,
+                            on_open=open_task,
+                            key_prefix="blocked",
+                            blocking_prerequisites=(
+                                task_service.blocking_prerequisites(task.id)
+                            ),
+                        )
+                else:
+                    st.info("No blocked tasks.")
+
+    with st.expander(f"Completed tasks ({len(completed)})", expanded=False):
+        st.subheader("Completed tasks")
+        st.caption(
+            "Recently completed work remains available here. Reopen a task to "
+            "return it to Open status."
+        )
+        if completed:
+            completed_columns = st.columns(2)
+            for index, task in enumerate(completed[:10]):
+                with completed_columns[index % 2]:
+                    task_card(
+                        task,
+                        on_open=open_task,
+                        on_reopen=reopen_task,
+                        key_prefix="completed",
+                    )
+            if len(completed) > 10:
+                st.caption(
+                    f"Showing 10 of {len(completed)} completed tasks. Open the "
+                    "Tasks page and enable Show completed to view all."
+                )
+        else:
+            st.info("No completed tasks yet.")
 
 elif page == "Tasks":
     selected_id = st.session_state.selected_task_id
@@ -1090,7 +1672,7 @@ elif page == "Tasks":
                 f"Task {(selected_task.subtask_order or 0) + 1} in "
                 f"{parent_epic.title}"
             )
-        elif st.button("← Back to all tasks"):
+        elif st.button("← Back to tasks"):
             close_task()
             st.rerun()
         dependency_blockers = task_service.blocking_prerequisites(
@@ -1148,9 +1730,27 @@ elif page == "Tasks":
             st.metric("Recorded time", format_minutes(own_recorded_minutes))
 
         if selected_task.task_type == "epic":
-            render_epic_tasks(selected_task, children)
+            (
+                overview_tab,
+                epic_tasks_tab,
+                ai_tab,
+                time_tab,
+                structure_tab,
+            ) = st.tabs(
+                ["Overview", "Epic tasks", "AI planning", "Time", "Structure"]
+            )
+        else:
+            overview_tab, ai_tab, time_tab, structure_tab = st.tabs(
+                ["Overview", "AI planning", "Time", "Structure"]
+            )
+            epic_tasks_tab = None
 
-        render_breakdown_planning(selected_task)
+        if epic_tasks_tab is not None:
+            with epic_tasks_tab:
+                render_epic_tasks(selected_task, children)
+
+        with ai_tab:
+            render_breakdown_planning(selected_task)
 
         status_options = (
             ["Completed"]
@@ -1166,7 +1766,7 @@ elif page == "Tasks":
             if selected_task.task_type == "epic"
             else STANDARD_ESTIMATE_MAX_HOURS
         )
-        with st.form(f"edit_{selected_task.id}"):
+        with overview_tab.form(f"edit_{selected_task.id}"):
             title = st.text_input(
                 "Title",
                 selected_task.title,
@@ -1307,12 +1907,12 @@ elif page == "Tasks":
                 st.session_state.pending_delete_task_id = None
                 st.rerun()
 
-        st.subheader("Recorded time")
-        st.caption(
+        time_tab.subheader("Recorded time")
+        time_tab.caption(
             "Recorded time is separate from the estimate. Each entry is limited "
             "to 12 hours, and all entries for one day cannot exceed 24 hours."
         )
-        with st.form(f"add_time_entry_{selected_task.id}"):
+        with time_tab.form(f"add_time_entry_{selected_task.id}"):
             entry_date = st.date_input(
                 "Work date",
                 value=date.today(),
@@ -1348,7 +1948,7 @@ elif page == "Tasks":
         task_time_entries = time_entry_service.list_for_task(selected_task.id)
         if task_time_entries:
             for entry in task_time_entries:
-                with st.expander(
+                with time_tab.expander(
                     f"{format_date(entry.work_date)} · {format_minutes(entry.minutes)}"
                 ):
                     with st.form(f"edit_time_entry_{entry.id}"):
@@ -1390,9 +1990,9 @@ elif page == "Tasks":
                             time_entry_service.delete(entry.id)
                             st.rerun()
         else:
-            st.caption("No recorded time for this task.")
+            time_tab.caption("No recorded time for this task.")
 
-        st.subheader("Hierarchy")
+        structure_tab.subheader("Hierarchy")
         descendants = tasks.descendant_ids(selected_task.id)
         parent_candidates = [
             task
@@ -1410,7 +2010,7 @@ elif page == "Tasks":
             if current_parent in parent_options
             else 0
         )
-        with st.form(f"parent_{selected_task.id}"):
+        with structure_tab.form(f"parent_{selected_task.id}"):
             chosen_parent = st.selectbox(
                 "Parent epic",
                 parent_options,
@@ -1431,18 +2031,18 @@ elif page == "Tasks":
                 except ValueError as exc:
                     st.error(str(exc))
 
-        st.subheader("Dependencies")
-        st.caption(
+        structure_tab.subheader("Dependencies")
+        structure_tab.caption(
             "Direction: this task requires its prerequisites. Blocking is "
             "calculated from incomplete prerequisites."
         )
         prerequisite_tasks = task_service.prerequisites(selected_task.id)
         dependent_tasks = task_service.dependents(selected_task.id)
 
-        st.markdown("**Prerequisites this task requires**")
+        structure_tab.markdown("**Prerequisites this task requires**")
         if prerequisite_tasks:
             for prerequisite in prerequisite_tasks:
-                prerequisite_label, remove_prerequisite = st.columns([4, 1])
+                prerequisite_label, remove_prerequisite = structure_tab.columns([4, 1])
                 prerequisite_label.write(task_identity(prerequisite))
                 if remove_prerequisite.button(
                     "Remove",
@@ -1458,12 +2058,12 @@ elif page == "Tasks":
                     )
                     st.rerun()
         else:
-            st.caption("No prerequisites.")
+            structure_tab.caption("No prerequisites.")
 
-        st.markdown("**Tasks that depend on this task**")
+        structure_tab.markdown("**Tasks that depend on this task**")
         if dependent_tasks:
             for dependent in dependent_tasks:
-                dependent_label, remove_dependent = st.columns([4, 1])
+                dependent_label, remove_dependent = structure_tab.columns([4, 1])
                 dependent_label.write(task_identity(dependent))
                 if remove_dependent.button(
                     "Remove",
@@ -1476,7 +2076,7 @@ elif page == "Tasks":
                     )
                     st.rerun()
         else:
-            st.caption("No dependent tasks.")
+            structure_tab.caption("No dependent tasks.")
 
         dependency_candidates = [
             task
@@ -1487,7 +2087,7 @@ elif page == "Tasks":
             candidate_labels = {
                 task.id: task_identity(task) for task in dependency_candidates
             }
-            with st.form(f"add_dependency_{selected_task.id}"):
+            with structure_tab.form(f"add_dependency_{selected_task.id}"):
                 prerequisite_id = st.selectbox(
                     "Add prerequisite",
                     list(candidate_labels),
@@ -1506,7 +2106,7 @@ elif page == "Tasks":
                     except ValueError as exc:
                         st.error(str(exc))
         else:
-            st.caption("Create another task before adding a dependency.")
+            structure_tab.caption("Create another task before adding a dependency.")
 
         pending_offer: DependencyOffer | None = (
             st.session_state.pending_dependency_offer
@@ -1597,7 +2197,7 @@ elif page == "Tasks":
             if selected_task.task_type == "epic"
             else "Add first task and convert to epic"
         )
-        with st.expander(add_task_label, expanded=False):
+        with structure_tab.expander(add_task_label, expanded=False):
             with st.form(f"add_subtask_{selected_task.id}"):
                 subtask_title = st.text_input(
                     "Task title",
@@ -1693,95 +2293,317 @@ elif page == "Tasks":
                     except TaskValidationError as exc:
                         st.error(str(exc))
 
-        show_completed = st.checkbox("Show completed", value=False)
-        current_tasks = tasks.list_roots(show_completed)
+        with st.container(key="task_index_controls"):
+            task_view = st.radio(
+                "Task view",
+                ["Overview", "Open", "Due today", "Blocked", "Completed"],
+                horizontal=True,
+                key="task_view",
+            )
+            show_epic_tasks = False
+            if task_view == "Overview":
+                show_epic_tasks = st.checkbox(
+                    "Show tasks inside epics",
+                    value=False,
+                )
+                st.caption(
+                    "Overview keeps epics compact by default. Open an epic for "
+                    "its ordered sequence, prerequisites, time, and planning controls."
+                )
+            else:
+                st.caption(
+                    "Dashboard views include matching work items inside epics so "
+                    "the list matches the Today-page count."
+                )
+
+        if task_view == "Overview":
+            current_tasks = tasks.list_roots(False)
+        elif task_view == "Open":
+            current_tasks = tasks.list_all(False)
+        elif task_view == "Due today":
+            current_tasks = task_service.due_today()
+        elif task_view == "Blocked":
+            current_tasks = task_service.blocked()
+        else:
+            current_tasks = task_service.completed()
+
         if not current_tasks:
-            st.info("No tasks to show.")
-        for task in current_tasks:
-            render_task_hierarchy(task)
+            st.info(f"No work items in the {task_view.lower()} view.")
+        else:
+            st.caption(
+                f"{len(current_tasks)} work item"
+                f"{'' if len(current_tasks) == 1 else 's'} · {task_view} view"
+            )
+            with st.container(key="task_index_grid"):
+                task_columns = st.columns(2)
+                for index, task in enumerate(current_tasks):
+                    with task_columns[index % 2]:
+                        if task_view == "Overview":
+                            render_task_hierarchy(
+                                task,
+                                show_children=show_epic_tasks,
+                            )
+                        else:
+                            if task.parent_task_id is not None:
+                                try:
+                                    parent = tasks.get(task.parent_task_id)
+                                    st.caption(f"Inside epic: {parent.title}")
+                                except KeyError:
+                                    pass
+                            task_card(
+                                task,
+                                on_open=open_task,
+                                on_reopen=(
+                                    reopen_task
+                                    if task_view == "Completed"
+                                    else None
+                                ),
+                                key_prefix=(
+                                    "task_view_"
+                                    + task_view.lower().replace(" ", "_")
+                                ),
+                                blocking_prerequisites=(
+                                    task_service.blocking_prerequisites(task.id)
+                                    if task_view == "Blocked"
+                                    else None
+                                ),
+                            )
 
 elif page == "Daily Journal":
-    page_header("Daily Journal", "Record progress, blockers, and reflection without scoring productivity.")
+    page_header(
+        "Daily Journal",
+        "Record progress, blockers, and reflection without scoring productivity.",
+    )
     selected = st.date_input("Entry date", value=date.today(), format="MM-DD-YYYY")
     entry = journals.get(selected) or JournalEntry(entry_date=selected)
-    with st.form("journal"):
-        completed = st.text_area("Completed today", entry.completed_today)
-        progress = st.text_area("In progress", entry.in_progress)
-        blocked_text = st.text_area("Blocked or waiting", entry.blocked_waiting)
-        reflections = st.text_area("Notes and reflections", entry.reflections)
-        tomorrow = st.text_area("Plan for tomorrow", entry.plan_tomorrow)
-        if st.form_submit_button("Save entry"):
-            journals.upsert(JournalEntry(selected, completed, progress, blocked_text, reflections, tomorrow))
-            st.success("Journal entry saved locally.")
-    st.subheader("Previous entries")
-    for item in journals.list_recent(10):
-        with st.expander(format_date(item.entry_date)):
-            st.markdown(f"**Completed:** {item.completed_today or '—'}")
-            st.markdown(f"**In progress:** {item.in_progress or '—'}")
-            st.markdown(f"**Blocked/waiting:** {item.blocked_waiting or '—'}")
-            st.markdown(f"**Reflections:** {item.reflections or '—'}")
-            st.markdown(f"**Tomorrow:** {item.plan_tomorrow or '—'}")
+
+    with st.container(key="journal_workspace"):
+        journal_entry_column, journal_history_column = st.columns(
+            [1.45, 1],
+            gap="large",
+        )
+
+        with journal_entry_column:
+            st.subheader("Journal entry")
+            with st.form("journal"):
+                completed_column, progress_column = st.columns(2)
+                completed = completed_column.text_area(
+                    "Completed today",
+                    entry.completed_today,
+                )
+                progress = progress_column.text_area(
+                    "In progress",
+                    entry.in_progress,
+                )
+                blocked_column, tomorrow_column = st.columns(2)
+                blocked_text = blocked_column.text_area(
+                    "Blocked or waiting",
+                    entry.blocked_waiting,
+                )
+                tomorrow = tomorrow_column.text_area(
+                    "Plan for tomorrow",
+                    entry.plan_tomorrow,
+                )
+                reflections = st.text_area(
+                    "Notes and reflections",
+                    entry.reflections,
+                )
+                if st.form_submit_button("Save entry", use_container_width=True):
+                    journals.upsert(
+                        JournalEntry(
+                            selected,
+                            completed,
+                            progress,
+                            blocked_text,
+                            reflections,
+                            tomorrow,
+                        )
+                    )
+                    st.success("Journal entry saved locally.")
+
+        with journal_history_column:
+            st.subheader("Previous entries")
+            recent_entries = journals.list_recent(10)
+            if not recent_entries:
+                st.info("No previous journal entries yet.")
+            for item in recent_entries:
+                with st.expander(format_date(item.entry_date)):
+                    st.markdown(f"**Completed:** {item.completed_today or '—'}")
+                    st.markdown(f"**In progress:** {item.in_progress or '—'}")
+                    st.markdown(f"**Blocked/waiting:** {item.blocked_waiting or '—'}")
+                    st.markdown(f"**Reflections:** {item.reflections or '—'}")
+                    st.markdown(f"**Tomorrow:** {item.plan_tomorrow or '—'}")
 
 elif page == "Assistant":
     page_header("Assistant", "Bounded local assistance with explicit data access.")
     ok, message = llm.healthcheck()
-    (st.success if ok else st.warning)(message)
-    include_tasks = st.checkbox("Allow access to selected task fields", value=False)
-    include_journal = st.checkbox("Allow access to recent journal fields", value=False)
-    retain_memory = st.checkbox("Save assistant memory", value=False, help="Disabled by default. Saved memory is user-controlled.")
-    st.info("Only the minimum selected records are sent to the configured local model. No cloud service is used by Daybook AI.")
-    request = st.text_area("Ask Daybook AI", placeholder="What should I focus on today?")
-    if st.button("Send to local model", disabled=not request.strip()):
-        records, provenance = context_service.build(include_tasks, include_journal)
-        st.caption(f"Sending {len(records)} minimized local record(s) to {MODEL_BASE_URL}.")
-        try:
-            answer = llm.chat(request, records)
-            st.markdown("**Local AI interpretation**")
-            st.write(answer)
-            st.markdown("**Records consulted**")
-            st.json(provenance)
-            governance.add_audit(request, provenance, answer)
-            if retain_memory:
-                governance.create_memory(f"Request: {request}\nResponse: {answer}")
-        except LocalModelError as exc:
-            st.error(str(exc))
-            st.caption("Tasks and journals remain fully available in limited mode.")
+    if ok and "Loaded model:" in message:
+        loaded_model = message.split("Loaded model:", 1)[1].strip()
+        message = f"Local AI ready · {Path(loaded_model).name}"
 
-    st.divider()
-    st.subheader("User-controlled memory")
-    for memory in governance.list_memories():
-        with st.expander(f"Memory {memory['id']}"):
-            edited = st.text_area("Content", memory["content"], key=f"m{memory['id']}")
-            c1, c2 = st.columns(2)
-            if c1.button("Update", key=f"mu{memory['id']}"):
-                governance.update_memory(memory["id"], edited)
-                st.rerun()
-            if c2.button("Delete", key=f"md{memory['id']}"):
-                governance.delete_memory(memory["id"])
-                st.rerun()
+    with st.container(key="assistant_workspace"):
+        assistant_main, assistant_controls = st.columns([1.6, 1], gap="large")
 
-    st.subheader("Audit history")
-    if st.button("Delete all audit history"):
-        governance.clear_audit()
-        st.rerun()
-    for audit in governance.list_audit():
-        with st.expander(f"{format_datetime(audit['created_at'])} · {audit['user_request'][:60]}"):
-            st.write(audit["recommendation"])
-            st.json(audit["records_consulted"])
-            if st.button("Delete record", key=f"a{audit['id']}"):
-                governance.delete_audit(audit["id"])
-                st.rerun()
+        with assistant_controls:
+            with st.container(border=True):
+                st.subheader("Local data access")
+                st.caption(
+                    "Access is off by default and applies only to this request."
+                )
+                include_tasks = st.checkbox(
+                    "Allow access to selected task fields",
+                    value=False,
+                )
+                include_journal = st.checkbox(
+                    "Allow access to recent journal fields",
+                    value=False,
+                )
+                retain_memory = st.checkbox(
+                    "Save assistant memory",
+                    value=False,
+                    help="Disabled by default. Saved memory is user-controlled.",
+                )
+
+            memory_tab, audit_tab = st.tabs(["Memory", "Audit"])
+            with memory_tab:
+                st.subheader("User-controlled memory")
+                memories = governance.list_memories()
+                if not memories:
+                    st.caption("No assistant memory is saved.")
+                for memory in memories:
+                    with st.expander(f"Memory {memory['id']}"):
+                        edited = st.text_area(
+                            "Content",
+                            memory["content"],
+                            key=f"m{memory['id']}",
+                        )
+                        c1, c2 = st.columns(2)
+                        if c1.button(
+                            "Update",
+                            key=f"mu{memory['id']}",
+                            use_container_width=True,
+                        ):
+                            governance.update_memory(memory["id"], edited)
+                            st.rerun()
+                        if c2.button(
+                            "Delete",
+                            key=f"md{memory['id']}",
+                            use_container_width=True,
+                        ):
+                            governance.delete_memory(memory["id"])
+                            st.rerun()
+
+            with audit_tab:
+                st.subheader("Audit history")
+                audits = governance.list_audit()
+                if st.button(
+                    "Delete all audit history",
+                    disabled=not audits,
+                    use_container_width=True,
+                ):
+                    governance.clear_audit()
+                    st.rerun()
+                if not audits:
+                    st.caption("No assistant audit records yet.")
+                for audit in audits:
+                    with st.expander(
+                        f"{format_datetime(audit['created_at'])} · "
+                        f"{audit['user_request'][:60]}"
+                    ):
+                        st.write(audit["recommendation"])
+                        st.json(audit["records_consulted"])
+                        if st.button("Delete record", key=f"a{audit['id']}"):
+                            governance.delete_audit(audit["id"])
+                            st.rerun()
+
+        with assistant_main:
+            st.subheader("Ask the local assistant")
+            (st.success if ok else st.warning)(message)
+            st.info(
+                "Only the minimum records you explicitly allow are sent to the "
+                "configured local model. Daybook AI does not use a cloud AI service."
+            )
+            request = st.text_area(
+                "Ask Daybook AI",
+                placeholder="What should I focus on today?",
+                height=140,
+            )
+            if st.button(
+                "Send to local model",
+                disabled=not request.strip(),
+                type="primary",
+                use_container_width=True,
+            ):
+                records, provenance = context_service.build(
+                    include_tasks,
+                    include_journal,
+                )
+                st.caption(
+                    f"Sending {len(records)} minimized local record(s) to "
+                    f"{MODEL_BASE_URL}."
+                )
+                try:
+                    answer = llm.chat(request, records)
+                    st.markdown("**Local AI interpretation**")
+                    st.write(answer)
+                    st.markdown("**Records consulted**")
+                    st.json(provenance)
+                    governance.add_audit(request, provenance, answer)
+                    if retain_memory:
+                        governance.create_memory(
+                            f"Request: {request}\nResponse: {answer}"
+                        )
+                except LocalModelError as exc:
+                    st.error(str(exc))
+                    st.caption(
+                        "Tasks and journals remain fully available in limited mode."
+                    )
 
 elif page == "About":
-    page_header("About Daybook AI")
-    st.write("Daybook AI is a local-first personal task manager and daily journal for working professionals who want a clearer sense of organization before focused work begins.")
-    st.write("It combines deterministic task rules with a bounded local language model for explanations, summaries, and task breakdowns. It does not monitor employees, score productivity, or act externally.")
-    st.write("Designed and coded by **Michael Schemer**. This application is a prototype for an Ethical AI course project, not a completed commercial product.")
-    st.button(
-        "Open Ethical AI page",
-        on_click=navigate_to,
-        args=("Ethical AI",),
+    page_header(
+        "About Daybook AI",
+        "A local-first ethical AI proof of concept for focused work.",
     )
+
+    with st.container(key="about_workspace"):
+        about_main, about_boundary = st.columns([1.55, 1], gap="large")
+
+        with about_main:
+            st.subheader("What Daybook AI is")
+            st.write(
+                "Daybook AI is a local-first personal task manager and daily "
+                "journal for working professionals who want a clearer sense of "
+                "organization before focused work begins."
+            )
+            st.write(
+                "It combines deterministic task rules with a bounded local "
+                "language model for explanations, summaries, and task breakdowns."
+            )
+            st.write(
+                "Designed and coded by **Michael Schemer**. This application is "
+                "a prototype for an Ethical AI course project, not a completed "
+                "commercial product."
+            )
+
+        with about_boundary:
+            with st.container(border=True):
+                st.subheader("Design boundary")
+                st.markdown(
+                    "**Rules determine. AI explains. AI proposes. Humans approve.**"
+                )
+                st.markdown(
+                    "- Local SQLite persistence\n"
+                    "- Local llama.cpp model serving\n"
+                    "- No telemetry or cloud AI dependency\n"
+                    "- No employee monitoring or productivity scoring\n"
+                    "- Explicit approval before AI-originated task writes"
+                )
+                st.button(
+                    "Open Ethical AI page",
+                    on_click=navigate_to,
+                    args=("Ethical AI",),
+                    use_container_width=True,
+                )
 
 elif page == "Ethical AI":
     page_header("Ethical AI", "Safeguards are implemented as product behavior, not only documentation.")
@@ -1795,8 +2617,14 @@ elif page == "Ethical AI":
         "User-controlled memory": "Persistent memory is off by default and can be inspected, edited, or deleted.",
         "No surveillance": "No productivity scoring, automatic time tracking, keystroke monitoring, or peer ranking exists. Recorded time is entered manually by the user.",
     }
-    for title, text in principles.items():
-        st.markdown(f"**{title}:** {text}")
+    with st.container(key="ethical_workspace"):
+        principle_column_one, principle_column_two = st.columns(2, gap="large")
+        principle_columns = [principle_column_one, principle_column_two]
+        for index, (title, text) in enumerate(principles.items()):
+            with principle_columns[index % 2]:
+                with st.container(border=True):
+                    st.markdown(f"**{title}**")
+                    st.write(text)
 
     st.subheader("Interactive action policy")
     examples = {
@@ -1815,3 +2643,17 @@ elif page == "Ethical AI":
         st.warning(result)
     else:
         st.error(result)
+
+    with st.container(border=True):
+        st.subheader("NIST AI RMF alignment")
+        st.caption("Conceptual course-project alignment, not a certification.")
+        st.markdown(
+            "**Govern:** human approval, provenance, auditability, and clear "
+            "authority boundaries.\n\n"
+            "**Map:** local data flows and model access are explicit and "
+            "user-controlled.\n\n"
+            "**Measure:** deterministic validation, focused tests, and fallback "
+            "behavior expose model limitations.\n\n"
+            "**Manage:** prohibited actions, local-only processing, and safe "
+            "failure keep AI subordinate to application rules."
+        )

@@ -20,6 +20,13 @@ from dotenv import load_dotenv
 from src.runtime.bootstrap import bootstrap_runtime
 from src.runtime.controller import ControllerConfig, ControllerServer
 from src.runtime.hardware import HardwareInfo, detect_hardware
+from src.runtime.state import (
+    RuntimeState,
+    remove_runtime_state,
+    request_stop,
+    status_runtime,
+    write_runtime_state,
+)
 
 STREAMLIT_COMPAT_SPEC = "streamlit==1.56.0"
 STREAMLIT_ASGI_CUTOFF = (1, 57, 0)
@@ -44,7 +51,8 @@ class RuntimeConfig:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Start Daybook AI.")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--screenshots",
         choices=("light", "dark", "both"),
         metavar="{light,dark,both}",
@@ -52,6 +60,16 @@ def parse_arguments() -> argparse.Namespace:
             "Capture application screenshots using the selected theme, "
             "then stop services started by the launcher."
         ),
+    )
+    mode.add_argument(
+        "--status",
+        action="store_true",
+        help="Report whether the managed Daybook AI application is running.",
+    )
+    mode.add_argument(
+        "--stop",
+        action="store_true",
+        help="Request a graceful shutdown of the managed Daybook AI application.",
     )
     return parser.parse_args()
 
@@ -462,6 +480,13 @@ def _capture_screenshots(
 def run() -> int:
     args = parse_arguments()
     project_root = Path(__file__).resolve().parents[2]
+
+    if getattr(args, "status", False):
+        return status_runtime(project_root)
+
+    if getattr(args, "stop", False):
+        return request_stop(project_root)
+
     # Explicit .env and process-environment settings must be available before
     # bootstrap decides whether any runtime downloads are necessary.
     load_dotenv(project_root / ".env")
@@ -562,6 +587,37 @@ def run() -> int:
 
     controller.mark_streamlit_ready()
 
+    try:
+        write_runtime_state(
+            project_root,
+            RuntimeState(
+                launcher_pid=os.getpid(),
+                controller_url=controller.url,
+                controller_token=config.controller_token,
+                streamlit_url=streamlit_url,
+                streamlit_pid=streamlit_process.pid,
+                model_pid=(
+                    model_process.pid
+                    if model_owned and model_process is not None
+                    else None
+                ),
+                model_owned=model_owned,
+            ),
+        )
+    except OSError as exc:
+        print(
+            f"Runtime state could not be created: {exc}",
+            flush=True,
+        )
+        controller.stop()
+        _stop_process(streamlit_process, "Streamlit")
+        _stop_model_server(
+            config,
+            model_process,
+            model_owned,
+        )
+        return 1
+
     print(f"Opening Daybook AI: {controller.url}", flush=True)
     webbrowser.open_new_tab(controller.url)
 
@@ -587,6 +643,7 @@ def run() -> int:
         # Leave the static goodbye page available for a few more seconds.
         time.sleep(3)
         controller.stop()
+        remove_runtime_state(project_root)
 
     return 0
 

@@ -278,6 +278,32 @@ def test_valid_proposal_parsing_and_application_owned_provenance(task_repo):
     assert proposal.subtasks[1].prerequisite_item_keys == ("research",)
 
 
+def test_request_decomposition_restores_application_owned_envelope(
+    task_repo,
+    task_service,
+    db,
+):
+    parent = ready_task(task_repo)
+
+    def model_payload(_contract):
+        payload = valid_payload(999, "model-choice")
+        payload["proposal_type"] = "create_tasks"
+        payload["requires_confirmation"] = False
+        return payload
+
+    model = FakeModel(proposal_factory=model_payload)
+    result = planning_service(
+        task_service,
+        db,
+        model,
+    ).request_decomposition(parent, {})
+
+    assert result.proposal.parent_task_id == parent.id
+    assert result.proposal.proposal_id.startswith("decomp-")
+    assert result.proposal.proposal_type == "task_decomposition"
+    assert result.proposal.requires_confirmation is True
+
+
 def test_missing_advisories_are_safely_normalized_to_an_empty_list(task_repo):
     parent = ready_task(task_repo)
     payload = valid_payload(parent.id, "expected")

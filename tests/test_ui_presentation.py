@@ -161,6 +161,16 @@ def test_task_card_css_includes_narrow_window_rules() -> None:
     assert "flex-basis:100%" in app_source
 
 
+def test_tasks_index_defaults_to_compact_epic_overview() -> None:
+    app_source = APP_FILE.read_text(encoding="utf-8")
+
+    assert '"Show tasks inside epics"' in app_source
+    assert "show_children=show_epic_tasks" in app_source
+    assert "task_columns = st.columns(2)" in app_source
+    assert "if children and depth == 0 and not show_children" in app_source
+    assert "Open the epic to view ordered tasks and prerequisites." in app_source
+
+
 def test_phase6_generation_and_phase7_review_have_explicit_boundaries() -> None:
     app_source = APP_FILE.read_text(encoding="utf-8")
 
@@ -175,6 +185,17 @@ def test_phase6_generation_and_phase7_review_have_explicit_boundaries() -> None:
     assert '"Cancel breakdown"' in app_source
     assert "Untrusted local AI explanation" in app_source
     assert "Deterministic fallback" in app_source
+
+
+def test_clarification_answers_are_durable_and_use_save_then_update_wording() -> None:
+    app_source = APP_FILE.read_text(encoding="utf-8")
+
+    assert "planning.get_clarification_answers" in app_source
+    assert "planning.save_clarification_answers" in app_source
+    assert '"Save clarification answers"' in app_source
+    assert '"Update clarification answers"' in app_source
+    assert "local Daybook SQLite" in app_source
+
 
 def test_task_estimate_is_directly_optional_and_origin_is_application_controlled() -> None:
     app_source = APP_FILE.read_text(encoding="utf-8")

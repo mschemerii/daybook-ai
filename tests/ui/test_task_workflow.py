@@ -105,6 +105,13 @@ def test_create_open_edit_complete_and_reopen_task(
 
     navigate(app_frame, "Today")
 
+    completed_expander = app_frame.locator(
+        '[data-testid="stExpander"]'
+    ).filter(
+        has_text="Completed tasks",
+    ).first
+    completed_expander.locator("summary").click()
+
     completed_heading = app_frame.get_by_role(
         "heading",
         name=edited_title,
@@ -126,6 +133,13 @@ def test_create_open_edit_complete_and_reopen_task(
         exact=True,
     ).click()
 
+    # Streamlit reruns asynchronously after the button click. Wait until the
+    # completed card disappears so navigation cannot race the reopen rerun.
+    completed_heading.wait_for(
+        state="hidden",
+        timeout=15_000,
+    )
+
     navigate(app_frame, "Tasks")
 
     app_frame.get_by_role(
@@ -144,7 +158,8 @@ def test_open_task_from_today_page(app_frame: FrameLocator):
 
     open_buttons = app_frame.get_by_role(
         "button",
-        name=re.compile(r"open task", re.IGNORECASE),
+        name="Open task",
+        exact=True,
     )
 
     if open_buttons.count() == 0:
@@ -179,6 +194,10 @@ def test_epic_child_supports_time_and_completion_workflow(
         "button", name="Create task", exact=True
     ).click()
 
+    app_frame.get_by_role(
+        "tab", name="Structure", exact=True
+    ).click()
+
     add_task_expander = app_frame.locator(
         '[data-testid="stExpander"]'
     ).filter(has_text="Add first task and convert to epic").first
@@ -186,6 +205,9 @@ def test_epic_child_supports_time_and_completion_workflow(
     app_frame.get_by_label("Task title", exact=True).fill(child_title)
     app_frame.get_by_role("button", name="Add task", exact=True).click()
 
+    app_frame.get_by_role(
+        "tab", name="Epic tasks", exact=True
+    ).click()
     app_frame.get_by_role(
         "heading", name="Tasks in this epic", exact=True
     ).wait_for(state="visible", timeout=15_000)
@@ -201,6 +223,9 @@ def test_epic_child_supports_time_and_completion_workflow(
         name=re.compile(r"Back to epic:"),
     ).wait_for(state="visible", timeout=15_000)
     app_frame.get_by_role(
+        "tab", name="Time", exact=True
+    ).click()
+    app_frame.get_by_role(
         "heading", name="Recorded time", exact=True
     ).wait_for(state="visible", timeout=15_000)
     app_frame.get_by_label(
@@ -215,11 +240,17 @@ def test_epic_child_supports_time_and_completion_workflow(
     )
 
     app_frame.get_by_role(
+        "tab", name="Overview", exact=True
+    ).click()
+    app_frame.get_by_role(
         "button", name="Mark complete", exact=True
     ).click()
     app_frame.get_by_role(
         "button",
         name=re.compile(r"Back to epic:"),
+    ).click()
+    app_frame.get_by_role(
+        "tab", name="Epic tasks", exact=True
     ).click()
     app_frame.get_by_text(
         f"1. {child_title} — Completed",
