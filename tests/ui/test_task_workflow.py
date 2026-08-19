@@ -105,6 +105,13 @@ def test_create_open_edit_complete_and_reopen_task(
 
     navigate(app_frame, "Today")
 
+    completed_expander = app_frame.locator(
+        '[data-testid="stExpander"]'
+    ).filter(
+        has_text="Completed tasks",
+    ).first
+    completed_expander.locator("summary").click()
+
     completed_heading = app_frame.get_by_role(
         "heading",
         name=edited_title,
@@ -151,7 +158,8 @@ def test_open_task_from_today_page(app_frame: FrameLocator):
 
     open_buttons = app_frame.get_by_role(
         "button",
-        name=re.compile(r"open task", re.IGNORECASE),
+        name="Open task",
+        exact=True,
     )
 
     if open_buttons.count() == 0:

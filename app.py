@@ -133,6 +133,9 @@ if "breakdown_approval_result" not in st.session_state:
 if "task_flash_message" not in st.session_state:
     st.session_state.task_flash_message = None
 
+if "task_view" not in st.session_state:
+    st.session_state.task_view = "Overview"
+
 pending_page = st.session_state.pending_page
 
 if pending_page is not None:
@@ -146,6 +149,16 @@ elif "navigation_radio" not in st.session_state:
 def open_task(task_id: int) -> None:
     """Queue navigation to the selected task on the next rerun."""
     st.session_state.selected_task_id = task_id
+    st.session_state.pending_page = "Tasks"
+
+
+def open_task_view(view: str) -> None:
+    """Open Tasks in one of the bounded dashboard/list views."""
+    valid_views = {"Overview", "Open", "Due today", "Blocked", "Completed"}
+    if view not in valid_views:
+        raise ValueError(f"Unknown task view: {view}")
+    st.session_state.task_view = view
+    st.session_state.selected_task_id = None
     st.session_state.pending_page = "Tasks"
 
 
@@ -794,6 +807,13 @@ st.markdown(
 }
 [data-testid="stSidebar"] > div:first-child {
     padding-top: .9rem;
+    display:flex;
+    flex-direction:column;
+    min-height:100vh;
+}
+.st-key-sidebar_shutdown {
+    margin-top:auto;
+    padding-bottom:.75rem;
 }
 .st-key-sidebar_brand {
     padding: .2rem .35rem .8rem .35rem;
@@ -990,9 +1010,134 @@ st.markdown(
 .st-key-task_index_controls [data-testid="stHorizontalBlock"] {
     align-items:center;
 }
+.st-key-today_summary_metrics [data-testid="stButton"] button {
+    min-height:4.9rem;
+    justify-content:flex-start;
+    text-align:left;
+    white-space:pre-line;
+    padding:.65rem .8rem;
+    cursor:pointer;
+    border:1px solid color-mix(in srgb, var(--text-color) 28%, transparent);
+    border-radius:.6rem;
+    background:color-mix(
+        in srgb,
+        var(--secondary-background-color) 74%,
+        var(--background-color)
+    );
+    box-shadow:0 1px 0 color-mix(in srgb, var(--text-color) 8%, transparent);
+    transition:
+        border-color .12s ease,
+        transform .12s ease,
+        background .12s ease,
+        box-shadow .12s ease;
+}
+.st-key-today_summary_metrics [data-testid="stButton"] button:hover {
+    border-color:color-mix(in srgb, #29B5E8 78%, var(--text-color));
+    background:color-mix(
+        in srgb,
+        var(--secondary-background-color) 90%,
+        var(--background-color)
+    );
+    box-shadow:0 0 0 1px color-mix(in srgb, #29B5E8 22%, transparent);
+    transform:translateY(-1px);
+}
+.st-key-today_summary_metrics [data-testid="stButton"] button:focus-visible {
+    outline:2px solid color-mix(in srgb, #29B5E8 75%, white);
+    outline-offset:2px;
+}
+.st-key-today_summary_metrics [data-testid="stButton"] button p {
+    white-space:pre-line;
+    line-height:1.35;
+    font-size:1rem;
+    font-weight:700;
+}
+.st-key-today_workspace,
+.st-key-journal_workspace,
+.st-key-assistant_workspace,
+.st-key-about_workspace,
+.st-key-ethical_workspace {
+    margin-top:.35rem;
+}
+.st-key-today_workspace [data-testid="stHorizontalBlock"],
+.st-key-journal_workspace [data-testid="stHorizontalBlock"],
+.st-key-assistant_workspace [data-testid="stHorizontalBlock"],
+.st-key-about_workspace [data-testid="stHorizontalBlock"],
+.st-key-ethical_workspace [data-testid="stHorizontalBlock"] {
+    gap:1rem;
+}
+.st-key-task_index_grid { margin-top:.25rem; }
+[data-baseweb="tab-list"] { gap:.15rem; margin-bottom:.45rem; }
+[role="tab"] { min-height:2.4rem; padding:.35rem .7rem; }
+.block-container h1 { font-size:1.72rem; line-height:1.2; padding-bottom:.08rem; }
+.block-container h2 { font-size:1.22rem; line-height:1.25; }
+.block-container h3 { font-size:1.02rem; }
+@media (max-width: 900px) {
+    .st-key-task_index_grid > div > [data-testid="stHorizontalBlock"],
+    .st-key-today_workspace > div > [data-testid="stHorizontalBlock"],
+    .st-key-journal_workspace > div > [data-testid="stHorizontalBlock"],
+    .st-key-assistant_workspace > div > [data-testid="stHorizontalBlock"],
+    .st-key-about_workspace > div > [data-testid="stHorizontalBlock"],
+    .st-key-ethical_workspace > div > [data-testid="stHorizontalBlock"] {
+        flex-wrap:wrap;
+    }
+    .st-key-task_index_grid > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-today_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-journal_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-assistant_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-about_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    .st-key-ethical_workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        min-width:100%;
+        flex-basis:100%;
+    }
+}
 .small-note {font-size:.85rem; color:var(--text-color); opacity:.86;}
 </style>
 """,
+    unsafe_allow_html=True,
+)
+
+
+# phase7-5-sidebar-shutdown-bottom
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"] {
+        position: relative;
+    }
+
+    [data-testid="stSidebar"] > div:first-child {
+        padding-bottom: 5.75rem;
+    }
+
+    .st-key-sidebar_shutdown {
+        position: absolute !important;
+        left: .9rem;
+        right: .9rem;
+        bottom: 1rem;
+        margin-top: 0 !important;
+        padding: .7rem 0 0 0 !important;
+        border-top: 1px solid color-mix(
+            in srgb,
+            var(--text-color) 16%,
+            transparent
+        );
+        background: color-mix(
+            in srgb,
+            var(--secondary-background-color) 96%,
+            var(--background-color)
+        );
+        z-index: 20;
+    }
+
+    .st-key-sidebar_shutdown .shutdown-link-wrap {
+        justify-content: stretch !important;
+    }
+
+    .st-key-sidebar_shutdown .shutdown-link {
+        width: 100% !important;
+    }
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
@@ -1024,6 +1169,7 @@ with st.sidebar:
         )
 
     st.caption("Local-first · No telemetry")
+    st.caption("Rules determine · AI explains/proposes · You approve")
     st.caption(f"Backend: {detected_backend}")
 
     if page != st.session_state.page:
@@ -1032,39 +1178,23 @@ with st.sidebar:
             st.session_state.selected_task_id = None
         st.rerun()
 
-with st.container(key="top_navigation"):
-    heading_column, shutdown_column = st.columns(
-        [9, 2],
-        vertical_alignment="center",
+
+    shutdown_query = urlencode({"token": CONTROLLER_TOKEN})
+    shutdown_url = escape(
+        f"{CONTROLLER_URL.rstrip('/')}/shutdown?{shutdown_query}",
+        quote=True,
     )
-
-    with heading_column:
+    with st.container(key="sidebar_shutdown"):
         st.markdown(
             f"""
-            <div class="topbar-kicker">Daybook AI</div>
-            <div class="topbar-title">{escape(st.session_state.page)}</div>
-            <div class="topbar-runtime">
-                Runtime: {escape(detected_gpu)} · Backend: {escape(detected_backend)}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with shutdown_column:
-        shutdown_query = urlencode({"token": CONTROLLER_TOKEN})
-        shutdown_url = escape(
-            f"{CONTROLLER_URL.rstrip('/')}/shutdown?{shutdown_query}",
-            quote=True,
-        )
-        st.markdown(
-            f"""
-            <div class="shutdown-link-wrap">
+            <div class="shutdown-link-wrap" style="justify-content:flex-start;">
                 <a
                     class="shutdown-link"
                     href="{shutdown_url}"
                     target="_top"
                     aria-label="Shut down Daybook AI"
                     title="Close Daybook AI and stop locally started services"
+                    style="width:100%;"
                 >
                     ⏻ Shut down
                 </a>
@@ -1072,6 +1202,18 @@ with st.container(key="top_navigation"):
             """,
             unsafe_allow_html=True,
         )
+
+with st.container(key="top_navigation"):
+    st.markdown(
+        f"""
+        <div class="topbar-kicker">Daybook AI</div>
+        <div class="topbar-title">{escape(st.session_state.page)}</div>
+        <div class="topbar-runtime">
+            Runtime: {escape(detected_gpu)} · Backend: {escape(detected_backend)}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 page = st.session_state.page
@@ -1120,95 +1262,143 @@ if page == "Today":
     blocked = task_service.blocked()
     due = task_service.due_today()
     completed = task_service.completed()
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Open tasks", len(open_tasks))
-    c2.metric("Due today", len(due))
-    c3.metric("Blockers", len(blocked))
-    c4.metric("Completed", len(completed))
 
-    st.subheader("Recommended focus")
-    st.caption("Selected by application rules. The local AI may explain the result, but it does not set the order.")
-    focus = task_service.focus_items()
-    if not focus:
-        st.info("No open, unblocked tasks are available.")
-    for position, task in enumerate(focus, start=1):
-        facts = task_service.ranking_facts(task, position)
-        task_card(task, facts.deterministic_explanation, open_task, "focus")
-        with st.expander(
-            f"Deterministic ranking facts · calculated position {position}",
-            expanded=False,
-        ):
-            st.json(facts.to_dict())
-            st.caption(
-                "User-assigned priority is an input. The calculated focus "
-                "position is the application-rule result."
-            )
-        stored_explanation = st.session_state.ranking_ai_explanations.get(task.id)
-        if (
-            stored_explanation is not None
-            and stored_explanation["facts"] != facts.to_dict()
-        ):
-            del st.session_state.ranking_ai_explanations[task.id]
-            stored_explanation = None
-        action_label = (
-            "Retry AI explanation"
-            if stored_explanation is not None
-            and not stored_explanation["result"].used_ai
-            else "Explain with AI"
+    with st.container(key="today_summary_metrics"):
+        metric_columns = st.columns(4)
+        metric_specs = (
+            ("Open tasks", len(open_tasks), "Open", "open"),
+            ("Due today", len(due), "Due today", "due"),
+            ("Blockers", len(blocked), "Blocked", "blocked"),
+            ("Completed", len(completed), "Completed", "completed"),
         )
-        if st.button(action_label, key=f"explain_focus_{task.id}"):
-            result = planning_service.explain_with_ai(facts)
-            st.session_state.ranking_ai_explanations[task.id] = {
-                "facts": facts.to_dict(),
-                "result": result,
-            }
-            st.rerun()
-        stored_explanation = st.session_state.ranking_ai_explanations.get(task.id)
-        if stored_explanation is not None:
-            result = stored_explanation["result"]
-            if result.used_ai:
-                st.markdown("**Untrusted local AI explanation**")
-                st.text(result.text)
-            else:
-                st.info(result.message)
-                st.markdown("**Deterministic fallback**")
-                st.text(result.text)
+        for column, (label, count, view, key_suffix) in zip(
+            metric_columns,
+            metric_specs,
+        ):
+            with column:
+                if st.button(
+                    f"{count}\n{label}",
+                    key=f"today_metric_{key_suffix}",
+                    use_container_width=True,
+                    help=f"Open the {view.lower()} task view.",
+                ):
+                    open_task_view(view)
+                    st.rerun()
 
-    st.subheader("Due today")
-    if due:
-        for task in due:
-            task_card(task, on_open=open_task, key_prefix="due")
-    else:
-        st.info("No tasks are due today.")
+    focus = task_service.focus_items()
+    with st.container(key="today_workspace"):
+        focus_column, activity_column = st.columns([1.65, 1], gap="large")
 
-    st.subheader("Current blockers")
-    if blocked:
-        for task in blocked:
-            task_card(
-                task,
-                on_open=open_task,
-                key_prefix="blocked",
-                blocking_prerequisites=task_service.blocking_prerequisites(
-                    task.id
-                ),
+        with focus_column:
+            st.subheader("Recommended focus")
+            st.caption(
+                "Selected by application rules. The local AI may explain the "
+                "result, but it does not set the order."
             )
-    else:
-        st.info("No blocked tasks.")
+            if not focus:
+                st.info("No open, unblocked tasks are available.")
+            for position, task in enumerate(focus, start=1):
+                facts = task_service.ranking_facts(task, position)
+                task_card(
+                    task,
+                    facts.deterministic_explanation,
+                    open_task,
+                    "focus",
+                )
+                with st.expander(
+                    f"Deterministic ranking facts · calculated position {position}",
+                    expanded=False,
+                ):
+                    st.json(facts.to_dict())
+                    st.caption(
+                        "User-assigned priority is an input. The calculated focus "
+                        "position is the application-rule result."
+                    )
+                stored_explanation = (
+                    st.session_state.ranking_ai_explanations.get(task.id)
+                )
+                if (
+                    stored_explanation is not None
+                    and stored_explanation["facts"] != facts.to_dict()
+                ):
+                    del st.session_state.ranking_ai_explanations[task.id]
+                    stored_explanation = None
 
-    st.subheader("Completed tasks")
-    st.caption("Recently completed work remains visible here. Reopen a task to return it to Open status.")
-    if completed:
-        for task in completed[:10]:
-            task_card(
-                task,
-                on_open=open_task,
-                on_reopen=reopen_task,
-                key_prefix="completed",
-            )
-        if len(completed) > 10:
-            st.caption(f"Showing 10 of {len(completed)} completed tasks. Open the Tasks page and enable Show completed to view all.")
-    else:
-        st.info("No completed tasks yet.")
+                action_label = (
+                    "Retry AI explanation"
+                    if stored_explanation is not None
+                    and not stored_explanation["result"].used_ai
+                    else "Explain with AI"
+                )
+                if st.button(action_label, key=f"explain_focus_{task.id}"):
+                    result = planning_service.explain_with_ai(facts)
+                    st.session_state.ranking_ai_explanations[task.id] = {
+                        "facts": facts.to_dict(),
+                        "result": result,
+                    }
+                    st.rerun()
+
+                stored_explanation = (
+                    st.session_state.ranking_ai_explanations.get(task.id)
+                )
+                if stored_explanation is not None:
+                    result = stored_explanation["result"]
+                    if result.used_ai:
+                        st.markdown("**Untrusted local AI explanation**")
+                        st.text(result.text)
+                    else:
+                        st.info(result.message)
+                        st.markdown("**Deterministic fallback**")
+                        st.text(result.text)
+
+        with activity_column:
+            due_tab, blocker_tab = st.tabs(["Due today", "Blockers"])
+            with due_tab:
+                st.subheader("Due today")
+                if due:
+                    for task in due:
+                        task_card(task, on_open=open_task, key_prefix="due")
+                else:
+                    st.info("No tasks are due today.")
+
+            with blocker_tab:
+                st.subheader("Current blockers")
+                if blocked:
+                    for task in blocked:
+                        task_card(
+                            task,
+                            on_open=open_task,
+                            key_prefix="blocked",
+                            blocking_prerequisites=(
+                                task_service.blocking_prerequisites(task.id)
+                            ),
+                        )
+                else:
+                    st.info("No blocked tasks.")
+
+    with st.expander(f"Completed tasks ({len(completed)})", expanded=False):
+        st.subheader("Completed tasks")
+        st.caption(
+            "Recently completed work remains available here. Reopen a task to "
+            "return it to Open status."
+        )
+        if completed:
+            completed_columns = st.columns(2)
+            for index, task in enumerate(completed[:10]):
+                with completed_columns[index % 2]:
+                    task_card(
+                        task,
+                        on_open=open_task,
+                        on_reopen=reopen_task,
+                        key_prefix="completed",
+                    )
+            if len(completed) > 10:
+                st.caption(
+                    f"Showing 10 of {len(completed)} completed tasks. Open the "
+                    "Tasks page and enable Show completed to view all."
+                )
+        else:
+            st.info("No completed tasks yet.")
 
 elif page == "Tasks":
     selected_id = st.session_state.selected_task_id
@@ -1248,7 +1438,7 @@ elif page == "Tasks":
                 f"Task {(selected_task.subtask_order or 0) + 1} in "
                 f"{parent_epic.title}"
             )
-        elif st.button("← Back to all tasks"):
+        elif st.button("← Back to tasks"):
             close_task()
             st.rerun()
         dependency_blockers = task_service.blocking_prerequisites(
@@ -1870,121 +2060,316 @@ elif page == "Tasks":
                         st.error(str(exc))
 
         with st.container(key="task_index_controls"):
-            show_completed_col, show_epic_tasks_col, list_note_col = st.columns(
-                [1, 1.35, 2.65],
-                vertical_alignment="center",
+            task_view = st.radio(
+                "Task view",
+                ["Overview", "Open", "Due today", "Blocked", "Completed"],
+                horizontal=True,
+                key="task_view",
             )
-            show_completed = show_completed_col.checkbox(
-                "Show completed",
-                value=False,
-            )
-            show_epic_tasks = show_epic_tasks_col.checkbox(
-                "Show tasks inside epics",
-                value=False,
-            )
-            list_note_col.caption(
-                "Epics stay compact by default. Open an epic for its ordered "
-                "task sequence, prerequisites, time, and planning controls."
-            )
+            show_epic_tasks = False
+            if task_view == "Overview":
+                show_epic_tasks = st.checkbox(
+                    "Show tasks inside epics",
+                    value=False,
+                )
+                st.caption(
+                    "Overview keeps epics compact by default. Open an epic for "
+                    "its ordered sequence, prerequisites, time, and planning controls."
+                )
+            else:
+                st.caption(
+                    "Dashboard views include matching work items inside epics so "
+                    "the list matches the Today-page count."
+                )
 
-        current_tasks = tasks.list_roots(show_completed)
+        if task_view == "Overview":
+            current_tasks = tasks.list_roots(False)
+        elif task_view == "Open":
+            current_tasks = tasks.list_all(False)
+        elif task_view == "Due today":
+            current_tasks = task_service.due_today()
+        elif task_view == "Blocked":
+            current_tasks = task_service.blocked()
+        else:
+            current_tasks = task_service.completed()
+
         if not current_tasks:
-            st.info("No tasks to show.")
+            st.info(f"No work items in the {task_view.lower()} view.")
         else:
             st.caption(
-                f"{len(current_tasks)} root work item"
-                f"{'' if len(current_tasks) == 1 else 's'}"
+                f"{len(current_tasks)} work item"
+                f"{'' if len(current_tasks) == 1 else 's'} · {task_view} view"
             )
-            task_columns = st.columns(2)
-            for index, task in enumerate(current_tasks):
-                with task_columns[index % 2]:
-                    render_task_hierarchy(
-                        task,
-                        show_children=show_epic_tasks,
-                    )
+            with st.container(key="task_index_grid"):
+                task_columns = st.columns(2)
+                for index, task in enumerate(current_tasks):
+                    with task_columns[index % 2]:
+                        if task_view == "Overview":
+                            render_task_hierarchy(
+                                task,
+                                show_children=show_epic_tasks,
+                            )
+                        else:
+                            if task.parent_task_id is not None:
+                                try:
+                                    parent = tasks.get(task.parent_task_id)
+                                    st.caption(f"Inside epic: {parent.title}")
+                                except KeyError:
+                                    pass
+                            task_card(
+                                task,
+                                on_open=open_task,
+                                on_reopen=(
+                                    reopen_task
+                                    if task_view == "Completed"
+                                    else None
+                                ),
+                                key_prefix=(
+                                    "task_view_"
+                                    + task_view.lower().replace(" ", "_")
+                                ),
+                                blocking_prerequisites=(
+                                    task_service.blocking_prerequisites(task.id)
+                                    if task_view == "Blocked"
+                                    else None
+                                ),
+                            )
 
 elif page == "Daily Journal":
-    page_header("Daily Journal", "Record progress, blockers, and reflection without scoring productivity.")
+    page_header(
+        "Daily Journal",
+        "Record progress, blockers, and reflection without scoring productivity.",
+    )
     selected = st.date_input("Entry date", value=date.today(), format="MM-DD-YYYY")
     entry = journals.get(selected) or JournalEntry(entry_date=selected)
-    with st.form("journal"):
-        completed = st.text_area("Completed today", entry.completed_today)
-        progress = st.text_area("In progress", entry.in_progress)
-        blocked_text = st.text_area("Blocked or waiting", entry.blocked_waiting)
-        reflections = st.text_area("Notes and reflections", entry.reflections)
-        tomorrow = st.text_area("Plan for tomorrow", entry.plan_tomorrow)
-        if st.form_submit_button("Save entry"):
-            journals.upsert(JournalEntry(selected, completed, progress, blocked_text, reflections, tomorrow))
-            st.success("Journal entry saved locally.")
-    st.subheader("Previous entries")
-    for item in journals.list_recent(10):
-        with st.expander(format_date(item.entry_date)):
-            st.markdown(f"**Completed:** {item.completed_today or '—'}")
-            st.markdown(f"**In progress:** {item.in_progress or '—'}")
-            st.markdown(f"**Blocked/waiting:** {item.blocked_waiting or '—'}")
-            st.markdown(f"**Reflections:** {item.reflections or '—'}")
-            st.markdown(f"**Tomorrow:** {item.plan_tomorrow or '—'}")
+
+    with st.container(key="journal_workspace"):
+        journal_entry_column, journal_history_column = st.columns(
+            [1.45, 1],
+            gap="large",
+        )
+
+        with journal_entry_column:
+            st.subheader("Journal entry")
+            with st.form("journal"):
+                completed_column, progress_column = st.columns(2)
+                completed = completed_column.text_area(
+                    "Completed today",
+                    entry.completed_today,
+                )
+                progress = progress_column.text_area(
+                    "In progress",
+                    entry.in_progress,
+                )
+                blocked_column, tomorrow_column = st.columns(2)
+                blocked_text = blocked_column.text_area(
+                    "Blocked or waiting",
+                    entry.blocked_waiting,
+                )
+                tomorrow = tomorrow_column.text_area(
+                    "Plan for tomorrow",
+                    entry.plan_tomorrow,
+                )
+                reflections = st.text_area(
+                    "Notes and reflections",
+                    entry.reflections,
+                )
+                if st.form_submit_button("Save entry", use_container_width=True):
+                    journals.upsert(
+                        JournalEntry(
+                            selected,
+                            completed,
+                            progress,
+                            blocked_text,
+                            reflections,
+                            tomorrow,
+                        )
+                    )
+                    st.success("Journal entry saved locally.")
+
+        with journal_history_column:
+            st.subheader("Previous entries")
+            recent_entries = journals.list_recent(10)
+            if not recent_entries:
+                st.info("No previous journal entries yet.")
+            for item in recent_entries:
+                with st.expander(format_date(item.entry_date)):
+                    st.markdown(f"**Completed:** {item.completed_today or '—'}")
+                    st.markdown(f"**In progress:** {item.in_progress or '—'}")
+                    st.markdown(f"**Blocked/waiting:** {item.blocked_waiting or '—'}")
+                    st.markdown(f"**Reflections:** {item.reflections or '—'}")
+                    st.markdown(f"**Tomorrow:** {item.plan_tomorrow or '—'}")
 
 elif page == "Assistant":
     page_header("Assistant", "Bounded local assistance with explicit data access.")
     ok, message = llm.healthcheck()
-    (st.success if ok else st.warning)(message)
-    include_tasks = st.checkbox("Allow access to selected task fields", value=False)
-    include_journal = st.checkbox("Allow access to recent journal fields", value=False)
-    retain_memory = st.checkbox("Save assistant memory", value=False, help="Disabled by default. Saved memory is user-controlled.")
-    st.info("Only the minimum selected records are sent to the configured local model. No cloud service is used by Daybook AI.")
-    request = st.text_area("Ask Daybook AI", placeholder="What should I focus on today?")
-    if st.button("Send to local model", disabled=not request.strip()):
-        records, provenance = context_service.build(include_tasks, include_journal)
-        st.caption(f"Sending {len(records)} minimized local record(s) to {MODEL_BASE_URL}.")
-        try:
-            answer = llm.chat(request, records)
-            st.markdown("**Local AI interpretation**")
-            st.write(answer)
-            st.markdown("**Records consulted**")
-            st.json(provenance)
-            governance.add_audit(request, provenance, answer)
-            if retain_memory:
-                governance.create_memory(f"Request: {request}\nResponse: {answer}")
-        except LocalModelError as exc:
-            st.error(str(exc))
-            st.caption("Tasks and journals remain fully available in limited mode.")
+    if ok and "Loaded model:" in message:
+        loaded_model = message.split("Loaded model:", 1)[1].strip()
+        message = f"Local AI ready · {Path(loaded_model).name}"
 
-    st.divider()
-    st.subheader("User-controlled memory")
-    for memory in governance.list_memories():
-        with st.expander(f"Memory {memory['id']}"):
-            edited = st.text_area("Content", memory["content"], key=f"m{memory['id']}")
-            c1, c2 = st.columns(2)
-            if c1.button("Update", key=f"mu{memory['id']}"):
-                governance.update_memory(memory["id"], edited)
-                st.rerun()
-            if c2.button("Delete", key=f"md{memory['id']}"):
-                governance.delete_memory(memory["id"])
-                st.rerun()
+    with st.container(key="assistant_workspace"):
+        assistant_main, assistant_controls = st.columns([1.6, 1], gap="large")
 
-    st.subheader("Audit history")
-    if st.button("Delete all audit history"):
-        governance.clear_audit()
-        st.rerun()
-    for audit in governance.list_audit():
-        with st.expander(f"{format_datetime(audit['created_at'])} · {audit['user_request'][:60]}"):
-            st.write(audit["recommendation"])
-            st.json(audit["records_consulted"])
-            if st.button("Delete record", key=f"a{audit['id']}"):
-                governance.delete_audit(audit["id"])
-                st.rerun()
+        with assistant_controls:
+            with st.container(border=True):
+                st.subheader("Local data access")
+                st.caption(
+                    "Access is off by default and applies only to this request."
+                )
+                include_tasks = st.checkbox(
+                    "Allow access to selected task fields",
+                    value=False,
+                )
+                include_journal = st.checkbox(
+                    "Allow access to recent journal fields",
+                    value=False,
+                )
+                retain_memory = st.checkbox(
+                    "Save assistant memory",
+                    value=False,
+                    help="Disabled by default. Saved memory is user-controlled.",
+                )
+
+            memory_tab, audit_tab = st.tabs(["Memory", "Audit"])
+            with memory_tab:
+                st.subheader("User-controlled memory")
+                memories = governance.list_memories()
+                if not memories:
+                    st.caption("No assistant memory is saved.")
+                for memory in memories:
+                    with st.expander(f"Memory {memory['id']}"):
+                        edited = st.text_area(
+                            "Content",
+                            memory["content"],
+                            key=f"m{memory['id']}",
+                        )
+                        c1, c2 = st.columns(2)
+                        if c1.button(
+                            "Update",
+                            key=f"mu{memory['id']}",
+                            use_container_width=True,
+                        ):
+                            governance.update_memory(memory["id"], edited)
+                            st.rerun()
+                        if c2.button(
+                            "Delete",
+                            key=f"md{memory['id']}",
+                            use_container_width=True,
+                        ):
+                            governance.delete_memory(memory["id"])
+                            st.rerun()
+
+            with audit_tab:
+                st.subheader("Audit history")
+                audits = governance.list_audit()
+                if st.button(
+                    "Delete all audit history",
+                    disabled=not audits,
+                    use_container_width=True,
+                ):
+                    governance.clear_audit()
+                    st.rerun()
+                if not audits:
+                    st.caption("No assistant audit records yet.")
+                for audit in audits:
+                    with st.expander(
+                        f"{format_datetime(audit['created_at'])} · "
+                        f"{audit['user_request'][:60]}"
+                    ):
+                        st.write(audit["recommendation"])
+                        st.json(audit["records_consulted"])
+                        if st.button("Delete record", key=f"a{audit['id']}"):
+                            governance.delete_audit(audit["id"])
+                            st.rerun()
+
+        with assistant_main:
+            st.subheader("Ask the local assistant")
+            (st.success if ok else st.warning)(message)
+            st.info(
+                "Only the minimum records you explicitly allow are sent to the "
+                "configured local model. Daybook AI does not use a cloud AI service."
+            )
+            request = st.text_area(
+                "Ask Daybook AI",
+                placeholder="What should I focus on today?",
+                height=140,
+            )
+            if st.button(
+                "Send to local model",
+                disabled=not request.strip(),
+                type="primary",
+                use_container_width=True,
+            ):
+                records, provenance = context_service.build(
+                    include_tasks,
+                    include_journal,
+                )
+                st.caption(
+                    f"Sending {len(records)} minimized local record(s) to "
+                    f"{MODEL_BASE_URL}."
+                )
+                try:
+                    answer = llm.chat(request, records)
+                    st.markdown("**Local AI interpretation**")
+                    st.write(answer)
+                    st.markdown("**Records consulted**")
+                    st.json(provenance)
+                    governance.add_audit(request, provenance, answer)
+                    if retain_memory:
+                        governance.create_memory(
+                            f"Request: {request}\nResponse: {answer}"
+                        )
+                except LocalModelError as exc:
+                    st.error(str(exc))
+                    st.caption(
+                        "Tasks and journals remain fully available in limited mode."
+                    )
 
 elif page == "About":
-    page_header("About Daybook AI")
-    st.write("Daybook AI is a local-first personal task manager and daily journal for working professionals who want a clearer sense of organization before focused work begins.")
-    st.write("It combines deterministic task rules with a bounded local language model for explanations, summaries, and task breakdowns. It does not monitor employees, score productivity, or act externally.")
-    st.write("Designed and coded by **Michael Schemer**. This application is a prototype for an Ethical AI course project, not a completed commercial product.")
-    st.button(
-        "Open Ethical AI page",
-        on_click=navigate_to,
-        args=("Ethical AI",),
+    page_header(
+        "About Daybook AI",
+        "A local-first ethical AI proof of concept for focused work.",
     )
+
+    with st.container(key="about_workspace"):
+        about_main, about_boundary = st.columns([1.55, 1], gap="large")
+
+        with about_main:
+            st.subheader("What Daybook AI is")
+            st.write(
+                "Daybook AI is a local-first personal task manager and daily "
+                "journal for working professionals who want a clearer sense of "
+                "organization before focused work begins."
+            )
+            st.write(
+                "It combines deterministic task rules with a bounded local "
+                "language model for explanations, summaries, and task breakdowns."
+            )
+            st.write(
+                "Designed and coded by **Michael Schemer**. This application is "
+                "a prototype for an Ethical AI course project, not a completed "
+                "commercial product."
+            )
+
+        with about_boundary:
+            with st.container(border=True):
+                st.subheader("Design boundary")
+                st.markdown(
+                    "**Rules determine. AI explains. AI proposes. Humans approve.**"
+                )
+                st.markdown(
+                    "- Local SQLite persistence\n"
+                    "- Local llama.cpp model serving\n"
+                    "- No telemetry or cloud AI dependency\n"
+                    "- No employee monitoring or productivity scoring\n"
+                    "- Explicit approval before AI-originated task writes"
+                )
+                st.button(
+                    "Open Ethical AI page",
+                    on_click=navigate_to,
+                    args=("Ethical AI",),
+                    use_container_width=True,
+                )
 
 elif page == "Ethical AI":
     page_header("Ethical AI", "Safeguards are implemented as product behavior, not only documentation.")
@@ -1998,8 +2383,14 @@ elif page == "Ethical AI":
         "User-controlled memory": "Persistent memory is off by default and can be inspected, edited, or deleted.",
         "No surveillance": "No productivity scoring, automatic time tracking, keystroke monitoring, or peer ranking exists. Recorded time is entered manually by the user.",
     }
-    for title, text in principles.items():
-        st.markdown(f"**{title}:** {text}")
+    with st.container(key="ethical_workspace"):
+        principle_column_one, principle_column_two = st.columns(2, gap="large")
+        principle_columns = [principle_column_one, principle_column_two]
+        for index, (title, text) in enumerate(principles.items()):
+            with principle_columns[index % 2]:
+                with st.container(border=True):
+                    st.markdown(f"**{title}**")
+                    st.write(text)
 
     st.subheader("Interactive action policy")
     examples = {
@@ -2018,3 +2409,17 @@ elif page == "Ethical AI":
         st.warning(result)
     else:
         st.error(result)
+
+    with st.container(border=True):
+        st.subheader("NIST AI RMF alignment")
+        st.caption("Conceptual course-project alignment, not a certification.")
+        st.markdown(
+            "**Govern:** human approval, provenance, auditability, and clear "
+            "authority boundaries.\n\n"
+            "**Map:** local data flows and model access are explicit and "
+            "user-controlled.\n\n"
+            "**Measure:** deterministic validation, focused tests, and fallback "
+            "behavior expose model limitations.\n\n"
+            "**Manage:** prohibited actions, local-only processing, and safe "
+            "failure keep AI subordinate to application rules."
+        )
