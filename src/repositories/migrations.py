@@ -360,6 +360,7 @@ def migrate(
     conn: sqlite3.Connection,
     db_path: str | Path,
     migrations: Sequence[Migration] = MIGRATIONS,
+    new_database_initializer: Callable[[sqlite3.Connection], None] | None = None,
 ) -> Path | None:
     """Upgrade a recognized database atomically and return its backup path, if any."""
     path = Path(db_path)
@@ -432,6 +433,8 @@ def migrate(
             migration.apply(conn)
             _record_migration(conn, migration)
         _validate_v09(conn, max(versions))
+        if is_new and new_database_initializer is not None:
+            new_database_initializer(conn)
         conn.commit()
     except Exception:
         conn.rollback()

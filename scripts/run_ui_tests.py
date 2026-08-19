@@ -132,6 +132,7 @@ def main() -> int:
         environment["DAYBOOK_DB_PATH"] = str(test_database)
         environment["DAYBOOK_TEST_URL"] = CONTROLLER_URL
         environment["DAYBOOK_CONTROLLER_TOKEN"] = controller_token
+        environment["DAYBOOK_SEED_DEMO"] = "0"
 
         print("Starting isolated Daybook AI test instance...")
 

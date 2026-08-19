@@ -57,6 +57,12 @@ MODEL_NAME = os.getenv("DAYBOOK_MODEL_NAME", "auto")
 MODEL_API_KEY = os.getenv("DAYBOOK_MODEL_API_KEY", "")
 CONTROLLER_URL = os.getenv("DAYBOOK_CONTROLLER_URL", "http://127.0.0.1:8500")
 CONTROLLER_TOKEN = os.getenv("DAYBOOK_CONTROLLER_TOKEN", "")
+SEED_DEMO = os.getenv("DAYBOOK_SEED_DEMO", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
 PAGES = ["Today", "Tasks", "Daily Journal", "Assistant", "About", "Ethical AI"]
 
 PREFERENCES_PATH = Path(
@@ -85,7 +91,7 @@ def _persist_appearance_mode() -> None:
 
 @st.cache_resource
 def services():
-    db = Database(DB_PATH)
+    db = Database(DB_PATH, seed_demo=SEED_DEMO)
     tasks = TaskRepository(db)
     dependencies = DependencyRepository(db)
     time_entries = TimeEntryRepository(db)
