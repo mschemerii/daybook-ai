@@ -4,6 +4,37 @@ Daybook AI is a compact, local-first task manager and daily journal for working 
 
 Designed and coded by **Michael Schemer** as an Ethical AI course prototype.
 
+> **Core principle:** Rules determine. AI explains. AI proposes. Humans approve.
+
+## Screenshots
+
+### Today dashboard
+
+![Daybook AI Today dashboard](docs/screenshots/light/01-today.png)
+
+### Task management
+
+![Daybook AI Tasks page](docs/screenshots/light/02-tasks.png)
+
+### Local assistant
+
+![Daybook AI Assistant page](docs/screenshots/light/04-assistant.png)
+
+### Ethical AI controls
+
+![Daybook AI Ethical AI page](docs/screenshots/light/06-ethical-ai.png)
+
+Additional screenshots are available in:
+
+- [`docs/screenshots/light/`](docs/screenshots/light/)
+- [`docs/screenshots/dark/`](docs/screenshots/dark/)
+
+## Video demo
+
+A recorded Daybook AI v0.9 walkthrough demonstrates installation, local-model startup, deterministic ranking, grounded AI explanations, human-reviewed task decomposition, and clean shutdown.
+
+**Demo video:** _Add the published video URL here after the final recording is uploaded._
+
 ## Features
 
 - Today view with open tasks, due-today tasks, blockers, and three rule-selected focus items.
@@ -20,7 +51,19 @@ Designed and coded by **Michael Schemer** as an Ethical AI course prototype.
 - Local audit history that can be inspected and deleted.
 - Interactive Ethical AI action-policy examples.
 - Limited mode when the model server is offline.
-- One-command bootstrapper that detects hardware, downloads missing local-AI components, starts llama.cpp and Streamlit, and opens the default browser.
+- Cross-platform installation and runtime bootstrap for Windows, macOS, and Linux.
+
+## Architecture
+
+Daybook AI uses:
+
+- **Python 3.12.x** for the application runtime.
+- **Streamlit 1.56.0** for the user interface.
+- **SQLite** for local persistent data.
+- **llama.cpp** for local model serving.
+- **Qwen3.5-0.8B GGUF** as the default local model.
+
+The model is intentionally subordinate to deterministic application logic. Task ranking, validation, dependency effects, persistence, and approval rules remain application-controlled.
 
 ## Recommended local model
 
@@ -30,96 +73,114 @@ The default model is **`unsloth/Qwen3.5-0.8B-GGUF`**, using:
 Qwen3.5-0.8B-UD-Q4_K_XL.gguf
 ```
 
-The first `python run.py` launch automatically downloads this file from the official Hugging Face repository when the `models/` directory does not already contain a GGUF model. An existing `.gguf` file is never replaced.
-
 Model repository:
 
 ```text
 https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF
 ```
 
-Another instruction-tuned GGUF may be used by placing it in `models/` or setting `DAYBOOK_MODEL_PATH` in `.env`.
-
-## Requirements
-
-- Python 3.12+
-- Streamlit 1.56.0 (pinned to avoid a confirmed 1.57+ static-file server regression)
-- SQLite, included with Python
-- llama.cpp with the `llama-server` executable
-- A local instruction-tuned GGUF model
+The launcher uses an existing `.gguf` model when one is already available and does not overwrite it. Another instruction-tuned GGUF can be selected with `DAYBOOK_MODEL_PATH` in `.env`.
 
 ## Install Daybook AI
+
+The repository includes installation scripts so a user does not need to manually create the virtual environment or install Python packages one at a time.
 
 ### macOS or Linux
 
 ```bash
-git clone <your-repository-url> daybook-ai
+git clone https://github.com/mschemerii/daybook-ai.git
 cd daybook-ai
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-cp .env.example .env
-python seed_data.py
+bash install.sh
 ```
 
-### Windows PowerShell
+The shell installer:
+
+1. Checks for a compatible Python 3.12.x runtime.
+2. Creates or reuses the project-local `.venv`.
+3. Installs and verifies packages from `requirements.txt` when needed.
+4. Runs the project preflight checks.
+5. Creates `.env` from `.env.example` when `.env` does not already exist.
+6. Preserves an existing `.env` instead of overwriting user configuration.
+7. Offers to launch Daybook AI when environment setup is complete.
+
+Useful installer options:
+
+```bash
+bash install.sh --yes
+bash install.sh --no-launch
+bash install.sh --yes --no-launch
+```
+
+`--yes` (or `-y`) accepts installer confirmations. `--no-launch` prepares the environment without starting the application.
+
+After installation, launch with:
+
+```bash
+./run.sh
+```
+
+If the executable bit is unavailable:
+
+```bash
+bash run.sh
+```
+
+The virtual environment does not need to be activated manually; `run.sh` uses `.venv/bin/python` directly.
+
+### Windows
+
+Clone the repository and run the batch installer:
+
+```bat
+git clone https://github.com/mschemerii/daybook-ai.git
+cd daybook-ai
+install.bat
+```
+
+`install.bat` invokes the PowerShell installer. The equivalent PowerShell command is:
 
 ```powershell
-git clone <your-repository-url> daybook-ai
-Set-Location daybook-ai
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-Copy-Item .env.example .env
-python seed_data.py
+.\install.ps1
 ```
 
-## Automatic llama.cpp installation
+Optional PowerShell switches are:
 
-Manual llama.cpp installation is not required for the normal setup. When `python run.py` cannot find `llama-server`, Daybook AI:
-
-1. Queries the official `ggml-org/llama.cpp` GitHub release API.
-2. Selects a prebuilt archive matching Windows, macOS, or Linux, the CPU architecture, and the detected NVIDIA, AMD, Intel, or Apple GPU when a matching build is available.
-3. Downloads and safely extracts it into `tools/llama.cpp/`.
-4. Uses the project-local executable without changing system directories or the user’s `PATH`.
-
-Official source:
-
-```text
-https://github.com/ggml-org/llama.cpp/releases
+```powershell
+.\install.ps1 -Yes
+.\install.ps1 -NoLaunch
+.\install.ps1 -Yes -NoLaunch
 ```
 
-The installer does not replace an existing project-local or system installation. If an accelerated package is unavailable, it selects the best compatible release and the application can fall back to CPU operation.
+After installation, launch with:
 
-Internet access is required only for the initial missing-component downloads. Daybook AI does not use internet access for tasks, journals, assistant prompts, analytics, or telemetry.
+```bat
+run.bat
+```
 
-### Optional manual installation
+`run.bat` uses `.venv\Scripts\python.exe` directly.
 
-Manual installation remains supported. Windows users may run `winget install llama.cpp`; macOS users may run `brew install llama.cpp`; Linux users may use an official release archive or build from source. A manually installed `llama-server` on `PATH`, or a path configured with `DAYBOOK_LLAMA_SERVER`, takes precedence over automatic installation.
+## First launch and local AI bootstrap
 
-## GPU detection and backend selection
+Environment installation and application startup are intentionally separated.
 
-Run Daybook AI with `python run.py`. The launcher checks only local operating-system information and commands; it does not transmit hardware details or use telemetry.
+When Daybook AI starts, `run.py` checks the local runtime and handles missing local-AI components. It can:
 
-It detects:
+1. Detect the operating system, CPU architecture, and supported GPU hardware.
+2. Use a configured or `PATH`-available `llama-server` when it passes validation.
+3. Otherwise install the pinned project-compatible llama.cpp runtime for the detected platform/backend.
+4. Verify runtime archives and executables before reuse.
+5. Use an existing GGUF model or download the default Qwen model when none is available.
+6. Start the authenticated llama.cpp server.
+7. Send a real test request to `/v1/chat/completions` before reporting AI inference as verified.
+8. Start Streamlit and the loopback-only browser controller.
+9. Open Daybook AI at `http://127.0.0.1:8500`.
+10. Keep task and journal functionality available in limited mode if local AI cannot be started or verified.
 
-| Detected hardware | Recommended llama.cpp backend | Default GPU layers |
-|---|---|---:|
-| NVIDIA GPU | CUDA | 99 |
-| AMD GPU | Vulkan or ROCm | 99 |
-| Intel GPU | Vulkan, SYCL, or OpenVINO | 99 |
-| Apple Silicon | Metal | 99 |
-| No supported GPU detected | CPU | 0 |
+Internet access is needed only when a missing runtime component or model must be downloaded. Daybook AI does not use cloud AI for normal task, journal, or assistant processing.
 
-Detection does not install drivers or prove that the installed `llama-server` binary contains the recommended backend. The launcher reports the detected GPU and backend recommendation. If the selected llama.cpp build cannot use that GPU, install the matching official build or set `DAYBOOK_GPU_LAYERS=0` for CPU mode.
+## Configuration
 
-Integrated graphics can appear alongside a discrete GPU. The launcher prefers a recognized NVIDIA, AMD, or Intel adapter when the operating system reports more than one device.
-
-## Configure the model
-
-The defaults require no model-path editing. Copy `.env.example` to `.env`; the launcher downloads the default model only when no GGUF is present. The relevant defaults are:
+The installer creates `.env` from `.env.example` when necessary. Current defaults include:
 
 ```dotenv
 DAYBOOK_DB_PATH=data/daybook.db
@@ -130,277 +191,210 @@ DAYBOOK_LLAMA_SERVER=llama-server
 DAYBOOK_MODEL_HOST=127.0.0.1
 DAYBOOK_MODEL_PORT=8080
 DAYBOOK_MODEL_CONTEXT_SIZE=4096
+DAYBOOK_CONTROLLER_HOST=127.0.0.1
+DAYBOOK_CONTROLLER_PORT=8500
 DAYBOOK_STREAMLIT_HOST=127.0.0.1
 DAYBOOK_STREAMLIT_PORT=8501
 ```
 
-When the configured file is absent but another `.gguf` already exists in `models/`, the existing model is used and is not overwritten.
-
-`DAYBOOK_LLAMA_SERVER` may be either a command available on `PATH` or an absolute path to the executable.
+Managed services are restricted to loopback addresses. Authentication tokens are generated per launch when they are not explicitly configured.
 
 ## Run Daybook AI
 
-Use the project launcher:
+The recommended launch commands are:
+
+### macOS or Linux
+
+```bash
+./run.sh
+```
+
+### Windows
+
+```bat
+run.bat
+```
+
+You can also invoke the Python launcher directly from an activated compatible environment:
 
 ```bash
 python run.py
 ```
 
-On Windows:
+### `run.py` options
 
-```powershell
-python run.py
-```
+The command-line modes are mutually exclusive.
 
-The launcher performs the following steps:
+| Command | Purpose |
+|---|---|
+| `python run.py` | Start Daybook AI, bootstrap/verify the local AI runtime, start Streamlit, and open the browser. |
+| `python run.py --status` | Report whether the managed Daybook AI instance is running. |
+| `python run.py --stop` | Request the same authenticated graceful shutdown used by the in-app **Shut down** control. |
+| `python run.py --screenshots light` | Start the app, capture the implemented pages in light mode, then stop launcher-owned services. |
+| `python run.py --screenshots dark` | Capture the implemented pages in dark mode. |
+| `python run.py --screenshots both` | Capture both light and dark screenshot sets. |
+| `python run.py --help` | Show the launcher help text. |
 
-1. Checks the installed Streamlit version and automatically installs the compatible 1.56.0 release when Streamlit is missing or version 1.57+ is installed.
-2. Detects the operating system, CPU architecture, and available Apple, NVIDIA, AMD, or Intel GPU.
-3. Uses an explicitly configured or `PATH`-available `llama-server` when it passes executable validation.
-4. Otherwise installs the pinned official llama.cpp `b10217` package selected by an explicit platform matrix.
-5. Verifies every runtime archive with its publisher-provided SHA-256 digest and records a compatibility manifest plus executable digest.
-6. Runs `llama-server --version` and `--list-devices`; GPU layers are enabled only when the intended backend is reported, with CPU fallback otherwise.
-7. Uses an existing GGUF model or downloads `Qwen3.5-0.8B-UD-Q4_K_XL.gguf` when none exists.
-8. Starts an authenticated llama.cpp server unless a compatible server is already running.
-9. Sends a real test request to `/v1/chat/completions` and requires a valid, non-empty completion before reporting AI as verified.
-10. Starts Streamlit and the authenticated local browser controller, then opens Daybook AI at `http://127.0.0.1:8500` automatically.
-11. Keeps task and journal features available if downloading, starting, or verifying the local model fails.
-
-The first launch may take longer because the model and runtime are downloaded. Progress and any errors are printed in the terminal; partially downloaded files use a `.part` suffix and are removed after a failed transfer.
-
-The normal user does not need the terminal after startup. Select **Shut down** in the Daybook AI header. The browser moves to a stable local goodbye page, then the launcher stops Streamlit and gracefully terminates only the llama.cpp process that it started. An already-running external llama.cpp server is left running. `Ctrl+C` remains available as a development fallback.
-
-### Check or stop Daybook AI from the terminal
-
-The managed launcher records only the local controller information needed to manage the running instance in a git-ignored `.daybook-runtime.json` file. The file is created with restrictive permissions when supported by the operating system and is removed during normal shutdown.
-
-Check whether the managed application is running:
+The wrapper scripts forward launcher options, so these also work:
 
 ```bash
-python run.py --status
+./run.sh --status
+./run.sh --stop
+./run.sh --screenshots both
 ```
 
-Request the same graceful shutdown used by the in-app **Shut down** control:
+Windows equivalents:
+
+```bat
+run.bat --status
+run.bat --stop
+run.bat --screenshots both
+```
+
+## Shutdown behavior
+
+The preferred shutdown method is the **Shut down** control in the Daybook AI interface.
+
+The browser moves to a stable local goodbye page, Streamlit stops, and llama.cpp is terminated only when Daybook AI started that process. An externally managed llama.cpp server is left running.
+
+Terminal shutdown is also available:
 
 ```bash
 python run.py --stop
 ```
 
-`--stop` sends an authenticated request to the existing local controller. It does not terminate an unrelated process merely because it is using a Daybook port, and an externally managed llama.cpp server remains running.
+The launcher stores only the local controller information needed to manage the running instance in the git-ignored `.daybook-runtime.json` file and removes it during normal shutdown.
 
-### Direct Streamlit command
+## Capture screenshots
 
-The recommended command is `python run.py` because it also handles hardware detection and llama.cpp. To start only Streamlit and still request automatic browser opening:
+Google Chrome must already be installed. Playwright uses the installed Chrome channel.
 
 ```bash
-streamlit run app.py --server.headless false --browser.gatherUsageStats false
+python run.py --screenshots light
+python run.py --screenshots dark
+python run.py --screenshots both
 ```
 
-This direct command does not start llama.cpp or perform GPU detection.
+Captured images are written to:
 
-### Verify that the Assistant is using llama.cpp
+```text
+docs/screenshots/light/
+docs/screenshots/dark/
+```
 
-At startup, the terminal must show a line similar to:
+The tracked project currently includes Today, Tasks, Daily Journal, Assistant, About, Ethical AI, and Task Detail screenshots in both themes.
+
+## Verify local inference
+
+Successful startup includes output similar to:
 
 ```text
 Local AI inference verified. Loaded model: Qwen3.5-0.8B-UD-Q4_K_XL.gguf
 ```
 
-This is stronger than a simple server health check. Daybook AI first reads `/v1/models`, then sends a small test completion to `/v1/chat/completions`. The Assistant page performs the same verification and displays the loaded model name. Every user message sent from the Assistant page is posted to the local llama.cpp OpenAI-compatible endpoint configured by `DAYBOOK_MODEL_BASE_URL`.
+This is more than a simple process or health check. Daybook AI reads the llama.cpp model endpoint and sends a small real completion request before the Assistant is treated as available.
 
-If the inference test fails, the Assistant is shown as unavailable, while Tasks and Daily Journal continue to work.
-
-## Start llama.cpp manually
-
-Manual startup remains available for troubleshooting:
-
-```bash
-LLAMA_API_KEY="choose-a-local-secret" llama-server \
-  -m models/Qwen3.5-0.8B-UD-Q4_K_XL.gguf \
-  --host 127.0.0.1 \
-  --port 8080 \
-  -c 4096 \
-  -ngl 99 \
-  --cors-origins localhost \
-  --no-cors-credentials \
-  --no-webui
-```
-
-For CPU-only operation:
-
-```bash
-LLAMA_API_KEY="choose-a-local-secret" llama-server \
-  -m models/Qwen3.5-0.8B-UD-Q4_K_XL.gguf \
-  --host 127.0.0.1 \
-  --port 8080 \
-  -c 4096 \
-  -ngl 0 \
-  --cors-origins localhost \
-  --no-cors-credentials \
-  --no-webui
-```
-
-Verify the OpenAI-compatible endpoint:
-
-```bash
-curl -H "Authorization: Bearer choose-a-local-secret" http://127.0.0.1:8080/v1/models
-```
-
-PowerShell alternative:
-
-```powershell
-Invoke-RestMethod -Headers @{Authorization="Bearer choose-a-local-secret"} http://127.0.0.1:8080/v1/models
-```
+If inference verification fails, Tasks and Daily Journal remain available in limited mode.
 
 ## Run tests
+
+Run the project test suite with:
 
 ```bash
 pytest -q
 ```
 
+Additional project validation and UI testing guidance is available in [`UI_TESTING.md`](UI_TESTING.md) and [`docs/VALIDATION_REPORT.md`](docs/VALIDATION_REPORT.md).
+
 ## Ethical safeguards
 
 - Rule-based prioritization is visibly separated from AI explanation.
-- Ranking explanations are requested deliberately, cached only in memory, and displayed as untrusted model text beside the application facts.
+- Ranking explanations are grounded in application-supplied facts and have deterministic fallback behavior.
 - The model receives only user-selected, minimized records.
-- No cloud calls, telemetry, internet tools, email, calendar, commands, or unrestricted file/database access exist.
+- No cloud AI service or telemetry is required for normal operation.
 - Hardware detection uses local operating-system information only.
-- The model cannot write to SQLite.
-- Task-decomposition output is strict JSON validated for identity, fields, lengths, estimates, dates, sequences, prerequisite references, cycles, advisories, and unsafe instructions.
-- Validated decomposition drafts may be stored without creating tasks, hierarchy links, dependencies, or time entries.
-- Draft items can be renamed, edited, inserted, removed, reordered, selected, deselected, and linked by stable proposal-local prerequisite keys. Final application validation is repeated after every human edit.
-- Unchanged model items remain `ai_generated`; edited model items become `ai_generated_user_edited`; restored original task content returns to `ai_generated`; manual review items are `user_added_during_review`. Selection and ordering do not alter provenance.
-- Explicit approval applies the reviewed structure in one SQLite transaction. Any failure rolls back tasks, hierarchy links, dependencies, proposal links, and proposal status.
-- Persisted proposal identity and `proposal_task_links` make repeated approval idempotent across reruns and new service sessions. Inconsistent approval records fail safely instead of recreating tasks.
-- AI-requested writes must use a proposal object and require application-side confirmation.
-- Persistent memory is off by default and is editable and deletable.
+- The model cannot write directly to SQLite.
+- Task-decomposition output is validated by application code before it can enter review.
+- Draft items can be renamed, edited, inserted, removed, reordered, selected, deselected, and linked before approval.
+- Explicit approval applies the reviewed task structure transactionally.
+- Duplicate approval is protected by durable proposal identity and idempotency checks.
+- Persistent memory is off by default and remains user-controlled.
 - Audit history is local and deletable.
-- No productivity scores, surveillance, peer ranking, or shaming language.
+- No productivity scoring, surveillance, keystroke monitoring, peer ranking, or shaming language is included.
 
-## Troubleshooting
-
-### Automatic llama.cpp installation failed
-
-Check the terminal for the pinned release, selected backend, digest validation, and download error. Confirm that GitHub is reachable. A manual installation can be configured with:
-
-```dotenv
-DAYBOOK_LLAMA_SERVER=/absolute/path/to/llama-server
-```
-
-Windows example:
-
-```dotenv
-DAYBOOK_LLAMA_SERVER=C:\path\to\llama-server.exe
-```
-
-### Automatic model download failed
-
-Confirm that Hugging Face is reachable, or manually place a GGUF file in `models/` and set:
-
-```dotenv
-DAYBOOK_MODEL_PATH=models/exact-model-filename.gguf
-```
-
-### GPU was detected but llama.cpp uses the CPU
-
-The launcher enables GPU layers only when `llama-server --list-devices` reports the expected backend. If driver or executable validation fails, it reports the fallback and uses CPU inference. Windows NVIDIA selects CUDA; Windows AMD selects HIP; Windows Intel selects SYCL; Linux AMD selects ROCm; Linux NVIDIA and Intel select Vulkan; macOS selects the official Metal-enabled package.
-
-### Browser does not open
-
-The launcher prints the local address, normally:
-
-```text
-http://127.0.0.1:8500
-```
-
-Browser opening can fail in remote shells, containers, or systems without a graphical session. The application remains available at the printed address.
+See [`docs/ETHICAL_AI.md`](docs/ETHICAL_AI.md) for additional design details.
 
 ## Limitations
 
-- Single-user local prototype; it has per-launch service tokens but no user-account system or encryption-at-rest layer.
-- Small local models may produce weak or invalid answers.
-- Unsupported or unavailable acceleration falls back to CPU and may be slower.
-- Phase 7 review and approval are implemented only in the existing task-decomposition section. Phase 8 reporting/export and Phase 9-wide UI integration remain deferred.
-- No external information is available to the assistant.
+- Daybook AI is a single-user local prototype, not a completed commercial product.
+- It has per-launch local service tokens but no user-account system or encryption-at-rest layer.
+- Small local models may produce weak, malformed, or invalid answers.
+- Unsupported or unavailable hardware acceleration falls back to CPU and may be slower.
+- Phase 7 review/approval is concentrated in the existing task-decomposition workflow.
+- Reporting/export work and broader Phase 9 UI integration remain deferred.
+- The assistant has no external information, email, calendar, or internet tools.
 
+## Future plans and roadmap
+
+Near-term work remains intentionally bounded so the current ethical and local-first architecture stays intact.
+
+### Planned next steps
+
+- Complete deterministic time reporting across daily, weekly, monthly, quarterly, yearly, and custom ranges.
+- Add PDF and CSV/ZIP export without involving the language model in report calculation.
+- Complete broader UI integration for remaining reporting/export workflows.
+- Continue cross-platform installer and runtime validation on Windows, macOS, and Linux.
+- Expand automated testing around startup, shutdown, failure recovery, and offline/limited mode.
+
+### Longer-term possibilities
+
+Possible local specialist modules include:
+
+- Planning specialist.
+- Journal summarizer.
+- Blocker-review assistant.
+- Meeting-note importer.
+- Privacy/audit reviewer.
+
+A future multi-agent design could place a small local orchestrator above those specialists, but only with explicit typed requests, least-privilege access, provenance, policy enforcement, confirmation gates, and a shared local audit layer.
+
+The current prototype does **not** dynamically create agents, delegate autonomously, communicate externally, or permit a model to write directly to application data.
+
+See [`docs/FUTURE_ROADMAP.md`](docs/FUTURE_ROADMAP.md) for the current roadmap statement.
 
 ## Streamlit compatibility note
 
-Daybook AI pins Streamlit to `1.56.0`. Streamlit 1.57 introduced a new Starlette/Uvicorn server path that can fail while serving frontend assets with `RuntimeError: Response content shorter than Content-Length`. The launcher automatically downgrades an incompatible Streamlit installation before starting the application.
+Daybook AI pins Streamlit to `1.56.0`. The launcher checks the installed Streamlit version and installs the compatible release when Streamlit is missing or an incompatible newer version is present.
 
-### Runtime reuse and LLM verification
+## Project status
 
-The launcher honors `DAYBOOK_LLAMA_SERVER` first, then a `llama-server` available on `PATH`. Automatically installed executables are reused only when their pinned release, operating system, architecture, backend, asset list, manifest, executable digest, version command, and device inspection all validate. Executables from sibling project folders are never reused. Existing GGUF models may still be reused from a sibling Daybook AI folder to avoid another large model download.
-
-AI availability is confirmed with a real request to `/v1/chat/completions`. Verification succeeds when llama.cpp returns a valid, non-empty completion in either `content` or `reasoning_content`; it does not require the model to repeat an exact phrase. Qwen thinking is disabled where supported so normal assistant responses are returned in the visible content field.
-
-## Browser controller and shutdown
-
-Run the application with:
-
-```bash
-python run.py
-```
-
-The launcher opens `http://127.0.0.1:8500`. This loopback-only controller displays the
-Streamlit interface running on port 8501. Selecting **Shut down** first moves
-the browser to a static goodbye page, then stops Streamlit and stops
-`llama-server` only when Daybook AI started that process. The shutdown request
-requires a fresh per-launch token generated by the launcher.
-
-The application does not require the user to inspect the terminal during
-ordinary use.
-
-## Capture implemented UI screenshots
-
-Google Chrome must already be installed. Playwright uses the installed Chrome channel; it does not install a second Chromium browser.
-
-Capture the implemented Streamlit pages in light mode:
-
-```bash
-python run.py --screenshots light
-```
-
-Capture dark mode:
-
-```bash
-python run.py --screenshots dark
-```
-
-Capture both themes:
-
-```bash
-python run.py --screenshots both
-```
-
-Screenshots are written to `docs/screenshots/light/` and `docs/screenshots/dark/`. The screenshot script is part of the project at `scripts/capture_pages.py` and should remain tracked in Git. Generated PNG files are ignored.
-
-## Final implementation checklist
+Current v0.9 capabilities include:
 
 - [x] Today, Tasks, Daily Journal, Assistant, About, and Ethical AI pages
 - [x] Clickable task cards and editable task details
-- [x] Completed-task visibility and one-click reopening from Today
-- [x] Epic/subtask hierarchy, dependency blocking, and reopening cascades
-- [x] Multiple dated time entries with 12-hour entry and 24-hour daily limits
-- [x] Governed task deletion with timed-subtask preservation and deletion audit
-- [x] Deterministic focus ordering with visible rule explanations
-- [x] Typed ranking facts, deliberate grounded AI explanations, cache invalidation, and deterministic fallback
+- [x] Epic/subtask hierarchy and dependency lifecycle controls
+- [x] Multiple dated time entries with validation limits
+- [x] Governed task deletion and deletion audit behavior
+- [x] Deterministic focus ordering and visible ranking facts
+- [x] Grounded local-AI explanations with deterministic fallback
 - [x] Deterministic decomposition classification and readiness clarification
-- [x] Strict decomposition proposals with bounded advisories and safe draft persistence
-- [x] Editable human review with stable keys, selection, ordering, manual insertion, removal, and prerequisite editing
-- [x] Application-owned provenance transitions and final deterministic revalidation
-- [x] Explicit atomic approval with rollback and durable idempotent replay
-- [x] Local SQLite persistence and sample data
-- [x] Local llama.cpp model server with real inference verification
-- [x] Recommended `unsloth/Qwen3.5-0.8B-GGUF` model
-- [x] Automatic model and llama.cpp bootstrap when missing
-- [x] Explicit Apple Metal, Windows CUDA/HIP/SYCL, Linux ROCm/Vulkan, and CPU package selection
-- [x] Runtime SHA-256, archive, executable, manifest, and device validation
-- [x] Loopback-only services with authenticated llama.cpp and controller shutdown requests
-- [x] Explicit task/journal consent and minimized model context
+- [x] Strict AI decomposition proposals
+- [x] Editable human review and application-owned provenance
+- [x] Explicit atomic approval and durable duplicate protection
+- [x] Local SQLite persistence
+- [x] Local llama.cpp inference verification
+- [x] Automatic model/runtime bootstrap when missing
+- [x] GPU/backend detection with CPU fallback
+- [x] Loopback-only managed services
 - [x] Local audit history and user-controlled memory
-- [x] Confirmation-gated AI write proposals
-- [x] Browser controller with user-facing shutdown page
-- [x] Light, dark, or both screenshot capture modes
+- [x] Graceful browser and terminal shutdown controls
+- [x] Light and dark screenshot capture modes
 - [x] Offline/limited mode when the model is unavailable
-- [x] Automated tests and Python compilation validation
+- [ ] Deterministic reports and PDF/CSV export
+- [ ] Broader Phase 9 UI integration
+
+## Repository
+
+```text
+https://github.com/mschemerii/daybook-ai
+```
