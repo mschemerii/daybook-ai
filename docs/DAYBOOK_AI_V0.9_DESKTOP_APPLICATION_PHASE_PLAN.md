@@ -7,7 +7,7 @@ Revision: Streamlit is no longer a required interface. The target is a local-fir
 | Item | Detail |
 | --- | --- |
 | Repository | github.com/mschemerii/daybook-ai |
-| Current GitHub main reviewed | 0f23cb311ace02a9270c1cda9c8c6f4816a10469 |
+| Current GitHub main reviewed | c4257d30d9e3d41dce0be1677dbd0862a7b2a5ea |
 | Desktop framework target | PySide6 / Qt for Python |
 | Core principle | Rules determine. AI explains. AI proposes. Humans approve. |
 
@@ -38,6 +38,7 @@ Every remaining phase or major desktop subphase uses its own branch and pull req
 - Review the PR diff and checks. Merge only after explicit approval.
 - After merge, verify main and optionally create the planned phase tag if approved.
 - Delete the merged branch only after explicit approval and successful post-merge verification.
+
 ## 3. Updated remaining roadmap
 
 | Work item | Scope | Branch | PR target | Status |
@@ -55,24 +56,30 @@ Objective: complete reporting and export as a UI-independent deterministic subsy
 - Today, selected daily, weekly, monthly, quarterly, yearly, and custom ranges.
 - Sunday-Saturday weeks; calendar and configurable fiscal-year periods; fiscal years labeled by ending year.
 - Condensed summary plus detailed actual-entry report; hierarchy, totals, sorting, empty states, and deleted-record exclusion.
+- Time reporting is task-specific: standalone tasks and subtasks display only the time recorded directly against that task.
+- Epics display cumulative recorded time rolled up from descendant tasks/subtasks. Epic rollups are informational aggregates only and must never be added again to report-wide totals.
+- Detailed time-entry rows and CSV records remain attached to the exact task/subtask where the work was recorded; no synthetic epic time entries are created.
 - Readable summary/detail PDF output based only on deterministic application data.
 - UTF-8 ZIP export containing tasks.csv and time_entries.csv with stable IDs, whole-minute durations, and referential consistency.
 - Current-month incomplete tasks with no entries under Current Tasks in Progress when due in the current month.
+
 ### Branch and PR gate
 
 - Branch: agent/v0.9-phase8-reporting-exports
 - PR: Phase 8 reporting and export -> main
 - Merge only after focused reporting/export tests, full non-UI regression, model-unavailable verification, diff review, and explicit approval.
 - Suggested approved tag after merge: v0.9-phase8-complete
+
 ### Acceptance evidence
 
 - Range and fiscal-boundary tests
-- Aggregation and hierarchy tests
+- Aggregation and hierarchy tests, including proof that epic cumulative values do not double-count task/subtask time in report totals
 - Empty-range and deletion-exclusion tests
 - PDF content/render validation
 - ZIP membership and CSV schema/reference tests
 - UTF-8 tests
 - Full non-UI regression plus compileall and git diff --check
+
 ## 5. Phase 9A - Desktop foundation and application shell
 
 Objective: introduce PySide6 without removing Streamlit yet. Build a native application shell that proves the desktop architecture, direct service integration, theme system, navigation, and lifecycle behavior before feature migration.
@@ -84,30 +91,39 @@ Objective: introduce PySide6 without removing Streamlit yet. Build a native appl
 - Keep the existing Streamlit app temporarily available as a migration reference and regression oracle; do not delete it in this phase.
 - Provide deterministic UI state handling that does not depend on Streamlit reruns or session state.
 - Add desktop test infrastructure suitable for headless/unit-level Qt testing and limited end-to-end interaction tests.
+
 ### Branch and PR gate
 
 - Branch: agent/v0.9-phase9a-desktop-foundation
 - PR: Phase 9A native desktop foundation -> main
 - Merge only after the desktop shell launches, closes cleanly, light/dark state persists, core services are reachable, and existing non-UI tests remain green.
 - Suggested approved tag after merge: v0.9-phase9a-complete
+
 ## 6. Phase 9B - Desktop workflow migration
 
 Objective: migrate all user-facing v0.9 workflows into the native desktop application while preserving existing deterministic and ethical boundaries.
 
 - Today dashboard: deterministic focus ranking/facts, journal snapshot, status cards, and grounded AI explanation/fallback.
 - Tasks: create/edit/complete/reopen/delete, estimates, epics/subtasks, ordering, dependencies, named warnings, blocked states, and time-entry behavior.
+- Blocking workflow: a task may not remain in an isolated manually set Blocked state. Blocking a task must associate it with one or more existing or newly created blocking tasks.
+- A blocked task cannot be resumed, receive new time entries, or be completed while any blocking task remains incomplete. When all blocking tasks are Completed, the blocked task becomes eligible to return to Open; it is not automatically put back In Progress.
+- Blocking tasks are ordinary Daybook tasks and retain their own status, due date, notes, time entries, dependencies, and journal associations.
 - AI decomposition: readiness, clarification, proposal generation, editable review, insert/remove/reorder/select, provenance, explicit approval, and idempotent persistence.
-- Daily Journal: create/edit/view workflows with existing persistence semantics.
+- Daily Journal: create/edit/view workflows plus explicit many-to-many task associations. A journal entry may reference zero or more tasks/subtasks, and the same task may be referenced by journal entries on multiple dates.
+- Journal-task links are contextual only. They must never create, infer, or modify time entries, task status, estimates, or completion state.
+- Journal-task deletion behavior must preserve historical meaning deliberately; the implementation must not silently erase historical context when a referenced task is deleted.
 - Reports: on-screen summary/detail views plus PDF and CSV ZIP export from Phase 8 services.
 - Assistant, About, Ethical AI, Settings, appearance preferences, local model status/fallback, and shutdown controls.
 - Ensure AI-generated interpretation is visually distinct from deterministic facts and cannot imply authoritative ranking or database authority.
 - Ensure long-running AI calls do not freeze the Qt event loop; use bounded worker execution while keeping persistence approval on validated application-service paths.
+
 ### Branch and PR gate
 
 - Branch: agent/v0.9-phase9b-desktop-workflows
 - PR: Phase 9B desktop workflow migration -> main
 - Merge only after the full desktop end-to-end workflow passes and model-unavailable fallback leaves deterministic workflows usable.
 - Suggested approved tag after merge: v0.9-phase9b-complete
+
 ## 7. Phase 9C - Desktop cutover, lifecycle, and packaging validation
 
 Objective: make the native desktop application the authoritative user interface, validate startup/shutdown/resource release, and prepare desktop distribution behavior before removing the legacy UI.
@@ -119,12 +135,14 @@ Objective: make the native desktop application the authoritative user interface,
 - Validate macOS desktop behavior first; preserve Windows launcher/install compatibility where current support exists.
 - Evaluate desktop packaging (for example PyInstaller) only after the source-run desktop application is stable. Packaging must not become a blocker for functional completion unless explicitly approved as a release requirement.
 - Create replacement desktop screenshot/test tooling before retiring browser-specific tooling.
+
 ### Branch and PR gate
 
 - Branch: agent/v0.9-phase9c-desktop-cutover
 - PR: Phase 9C desktop cutover and lifecycle -> main
 - Merge only after the desktop app is the default path and full desktop workflow, shutdown lifecycle, real inference, fallback, and export validation pass.
 - Suggested approved tag after merge: v0.9-phase9-complete
+
 ## 8. Phase 10 - Repository cleanup, documentation, final validation, and release preparation
 
 Objective: remove obsolete Streamlit-era implementation and test artifacts only after desktop parity is proven, then make the repository accurately represent the native desktop product.
@@ -145,6 +163,7 @@ Nothing is deleted merely because it mentions Streamlit. Each candidate must fir
 - Launcher/controller code that exists only to start, monitor, or stop Streamlit/browser processes.
 - README instructions, screenshots, and examples that describe Streamlit or browser startup as the current UI.
 - Any stale sample-data, generated artifact, obsolete test helper, abandoned migration experiment, duplicate documentation, or dead code discovered by reference analysis.
+
 ### Required cleanup verification
 
 - Repository-wide reference search for every deleted or renamed file/module.
@@ -153,6 +172,7 @@ Nothing is deleted merely because it mentions Streamlit. Each candidate must fir
 - No browser-only UI tests remain as authoritative desktop acceptance evidence.
 - No .db, .gguf, downloaded llama.cpp tools, credentials/.env, exports, runtime-state files, preference files, build output, or packaging artifacts are tracked.
 - Fresh install/start/stop behavior is documented and reproduced.
+
 ### Documentation and release work
 
 - Rewrite README architecture and screenshots for the desktop UI.
@@ -160,6 +180,7 @@ Nothing is deleted merely because it mentions Streamlit. Each candidate must fir
 - Update Ethical AI documentation with Todd May / Decency Principle, Floridi & Cowls principles, and NIST AI RMF conceptual alignment.
 - Reconcile automatic first-launch demo seeding with any legacy seed_data.py path so there is one clear sample-data story.
 - Run final focused tests, complete non-UI suite, desktop UI suite, shutdown lifecycle, real inference, fallback, migrations, exports, compileall, git diff --check, and repository safety review.
+
 ### Branch and PR gate
 
 - Branch: chore/v0.9-phase10-desktop-cleanup-release
@@ -167,35 +188,43 @@ Nothing is deleted merely because it mentions Streamlit. Each candidate must fir
 - The cleanup PR must list every removed file and the replacement/justification for its removal.
 - Merge only after complete desktop validation and explicit approval.
 - Do not create the final v0.9 tag/release until separately approved after merge and post-merge verification.
+
 ## 9. Required desktop end-to-end acceptance workflow
 
 1. Launch Daybook as a desktop window with no browser requirement.
 2. Create a task and view deterministic ranking facts.
 3. Request an AI explanation and verify grounded/fallback behavior.
-4. Create/manage dependencies and inspect named warnings/blocked state.
-5. Request decomposition for an eligible task.
-6. Review, edit, reorder, insert, select/deselect proposed subtasks.
-7. Explicitly approve and verify one atomic epic/subtask result with no duplicate approval writes.
-8. Record and manage dated time entries.
-9. Open summary/detail reports and export PDF plus CSV ZIP.
-10. Use Journal, Assistant, Ethical AI, and Settings paths.
-11. Switch appearance and verify persistence.
-12. Shut down cleanly and verify the Qt app and Daybook-owned llama.cpp process release resources.
+4. Block a task by selecting or creating an explicit blocking task; verify the blocked task cannot resume, accept new time entries, or complete until all blocking tasks are Completed.
+5. Complete the blocking task and verify the formerly blocked task becomes eligible to return to Open.
+6. Create/manage other dependencies and inspect named warnings/blocked state.
+7. Request decomposition for an eligible task.
+8. Review, edit, reorder, insert, select/deselect proposed subtasks.
+9. Explicitly approve and verify one atomic epic/subtask result with no duplicate approval writes.
+10. Record and manage dated time entries on individual tasks/subtasks; verify epic time is cumulative only.
+11. Create/edit a Daily Journal entry, associate it with zero, one, or multiple tasks/subtasks, and verify those links do not create or alter time records.
+12. Verify journal/task historical association behavior when a referenced task is deleted according to the approved preservation rule.
+13. Open summary/detail reports and export PDF plus CSV ZIP.
+14. Use Journal, Assistant, Ethical AI, and Settings paths.
+15. Switch appearance and verify persistence.
+16. Shut down cleanly and verify the Qt app and Daybook-owned llama.cpp process release resources.
+
 ## 10. Current repository observations relevant to the transition
 
-- GitHub main reviewed at commit 0f23cb311ace02a9270c1cda9c8c6f4816a10469.
+- GitHub main reviewed at commit c4257d30d9e3d41dce0be1677dbd0862a7b2a5ea.
 - The repository currently still has app.py, a .streamlit directory, Streamlit-specific tests, UI_TESTING.md, and browser/UI scripts.
 - requirements.txt currently declares streamlit==1.56.0 together with requests and python-dotenv.
 - The src tree already separates agent, models, repositories, runtime, services, ui, and utils. That separation should be used to minimize business-logic rewrites during the desktop transition.
+- The current Daily Journal persists one entry per date and has no task relationship; Phase 9B adds explicit journal-task associations rather than inferring them from journal text.
+- The current task service allows Open, In Progress, Blocked, and Completed statuses and can derive blocked state from incomplete prerequisites; Phase 9B tightens the workflow so Blocked always points to explicit blocking work.
 - The desktop migration therefore should be a controlled replacement of the presentation/runtime boundary, not a rewrite of the deterministic domain or AI-governance layers.
+
 ## 11. Definition of desktop v0.9 complete
 
-Daybook AI v0.9 desktop is complete only when the native PySide6 interface is the default supported UI; all existing v0.9 domain rules and AI-governance boundaries remain enforced; reports/exports are deterministic; all AI-originated persistence still requires explicit human approval; the application remains useful when the model is unavailable; startup/shutdown and model-memory release pass; legacy Streamlit artifacts have either been removed or explicitly justified; documentation matches the validated desktop build; and the final release/tag has been explicitly approved.
+Daybook AI v0.9 desktop is complete only when the native PySide6 interface is the default supported UI; all existing v0.9 domain rules and AI-governance boundaries remain enforced; reports/exports are deterministic; task/subtask time remains authoritative with epic-only cumulative rollups; Daily Journal entries can explicitly reference relevant tasks without inferring time; blocked tasks have explicit blocking-task relationships that prevent work until cleared; all AI-originated persistence still requires explicit human approval; the application remains useful when the model is unavailable; startup/shutdown and model-memory release pass; legacy Streamlit artifacts have either been removed or explicitly justified; documentation matches the validated desktop build; and the final release/tag has been explicitly approved.
 
 ## 12. Planning rule going forward
 
-Phase 8 remains the next implementation phase. The desktop redesign does not begin inside Phase 8. After Phase 8 is merged and approved, Phase 9A starts the desktop transition. This prevents reporting logic and UI migration from being mixed into one high-risk change.
-
+Phase 8 remains the next implementation phase. The desktop redesign does not begin inside Phase 8. After Phase 8 is merged and approved, Phase 9A starts the desktop transition. Journal-task associations and the strengthened blocked-task workflow are required Phase 9B changes and must not be pulled into Phase 8 reporting implementation. This prevents reporting logic and UI/domain migration from being mixed into one high-risk change.
 
 ---
 
