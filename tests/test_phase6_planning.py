@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 
@@ -362,13 +362,11 @@ def test_top_level_contract_rejections(task_repo, mutation, match):
     "field,value,match",
     [
         ("title", "", "Title is required"),
-        ("title", "x" * 51, "Title exceeds"),
         ("description", "", "Description is required"),
         ("description", "x" * 4001, "Description exceeds"),
         ("estimated_hours", 1.1, "quarter-hour"),
-        ("estimated_hours", 81, "quarter-hour"),
+        ("estimated_hours", 1000.25, "quarter-hour"),
         ("priority", "Urgent", "priority"),
-        ("priority", "Low", "inherited parent priority"),
         ("due_date", "08/20/2026", "due date"),
         ("suggested_sequence", -1, "positive integers"),
         ("completion_criterion", "", "Completion criterion is required"),
@@ -398,6 +396,34 @@ def test_duplicate_normalized_title_and_sequence_rejected(task_repo):
         PlanningService.validate_decomposition_response(
             json.dumps(payload), parent_task=parent, expected_proposal_id="expected"
         )
+
+
+def test_overlong_generated_title_is_shortened_for_human_review(task_repo):
+    parent = ready_task(task_repo)
+    payload = valid_payload(parent.id, "expected")
+    payload["subtasks"][0]["title"] = (
+        "Design and document the complete application architecture and interfaces"
+    )
+
+    proposal = PlanningService.validate_decomposition_response(
+        json.dumps(payload), parent_task=parent, expected_proposal_id="expected"
+    )
+
+    assert len(proposal.subtasks[0].title) <= 50
+    assert any("Shortened AI-generated" in warning for warning in proposal.warnings)
+
+
+def test_generated_priority_is_replaced_with_inherited_parent_priority(task_repo):
+    parent = ready_task(task_repo)
+    payload = valid_payload(parent.id, "expected")
+    payload["subtasks"][0]["priority"] = "Low"
+
+    proposal = PlanningService.validate_decomposition_response(
+        json.dumps(payload), parent_task=parent, expected_proposal_id="expected"
+    )
+
+    assert proposal.subtasks[0].priority == parent.priority
+    assert any("deterministic inherited parent priority" in warning for warning in proposal.warnings)
 
 
 def test_invalid_prerequisite_and_cycle_rejected(task_repo):

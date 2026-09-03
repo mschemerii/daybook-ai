@@ -198,12 +198,18 @@ def test_reordering_is_stable_and_rejects_partial_lists(task_repo, task_service)
         ({"title": "x" * 51}, "50 characters"),
         ({"title": "Valid", "description": "x" * 4001}, "4,000 characters"),
         ({"title": "Valid", "estimated_hours": 1.1}, "quarter-hour"),
-        ({"title": "Valid", "estimated_hours": 80.25}, "80 hours"),
+        ({"title": "Valid", "estimated_hours": 1000.25}, "1000 hours"),
     ],
 )
 def test_standard_task_validation_is_explicit(task_service, values, message):
     with pytest.raises(TaskValidationError, match=message):
         task_service.create_task(**values)
+
+
+def test_standard_task_allows_multiweek_estimate(task_service):
+    task = task_service.create_task(title="Multiweek project", estimated_hours=120)
+
+    assert task.estimated_hours == 120
 
 
 def test_epic_estimate_uses_epic_limit(task_service):
