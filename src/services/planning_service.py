@@ -976,6 +976,8 @@ class PlanningService:
         seen_sequences: set[int] = set()
         removed_unanchored_due_dates = False
         removed_self_dependencies: list[str] = []
+        shortened_titles: list[str] = []
+        corrected_priorities: list[str] = []
         for raw_item in raw_subtasks:
             cls._require_exact_fields(raw_item, SUBTASK_FIELDS, "subtask")
             item_key = cls._bounded_text(raw_item["item_key"], "Item key", 40, True)
@@ -984,7 +986,17 @@ class PlanningService:
             if item_key in seen_keys:
                 raise Phase6ValidationError("Proposal item keys must be unique.")
             seen_keys.add(item_key)
-            title = cls._bounded_text(raw_item["title"], "Title", TITLE_MAX_LENGTH, True)
+            generated_title = cls._bounded_text(
+                raw_item["title"], "Title", MAX_SUMMARY_LENGTH, True
+            )
+            cls._reject_unsafe_actionable_text((generated_title,))
+            title = generated_title
+            if len(title) > TITLE_MAX_LENGTH:
+                shortened = title[:TITLE_MAX_LENGTH].rstrip()
+                if " " in shortened:
+                    shortened = shortened.rsplit(" ", 1)[0].rstrip()
+                title = shortened or generated_title[:TITLE_MAX_LENGTH]
+                shortened_titles.append(title)
             normalized_title = " ".join(title.casefold().split())
             if normalized_title in seen_titles:
                 raise Phase6ValidationError("Proposed subtask titles must be unique.")
@@ -1006,9 +1018,8 @@ class PlanningService:
             if not isinstance(priority, str) or priority not in VALID_PRIORITIES:
                 raise Phase6ValidationError("A proposed priority is invalid.")
             if priority != parent_task.priority:
-                raise Phase6ValidationError(
-                    "Proposed priority must use the deterministic inherited parent priority."
-                )
+                priority = parent_task.priority
+                corrected_priorities.append(title)
             sequence = raw_item["suggested_sequence"]
             if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
                 raise Phase6ValidationError("Suggested sequence values must be positive integers.")
@@ -1083,6 +1094,20 @@ class PlanningService:
             warnings = (
                 f"Removed an impossible self-dependency from: {labels}. "
                 "Review prerequisite links before approval.",
+                *warnings,
+            )
+        if shortened_titles:
+            labels = ", ".join(shortened_titles)
+            warnings = (
+                "Shortened AI-generated subtask title(s) to Daybook's "
+                f"{TITLE_MAX_LENGTH}-character limit: {labels}. Review them before approval.",
+                *warnings,
+            )
+        if corrected_priorities:
+            labels = ", ".join(corrected_priorities)
+            warnings = (
+                "Replaced AI-generated priority with the deterministic inherited "
+                f"parent priority ({parent_task.priority}) for: {labels}. Review before approval.",
                 *warnings,
             )
         return ValidatedDecompositionProposal(

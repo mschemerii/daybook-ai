@@ -22,6 +22,15 @@ from PySide6.QtWidgets import (
 from src.desktop.composition import DesktopServices, ShellSnapshot
 from src.desktop.theme import AppearanceManager
 from src.desktop.widgets import ContentCard, MetricCard
+from src.desktop.views import (
+    AssistantView,
+    JournalView,
+    ReportsView,
+    TasksView,
+    TodayView,
+    about_view,
+    ethical_ai_view,
+)
 from src.runtime.preferences import VALID_APPEARANCES
 
 
@@ -44,7 +53,7 @@ NAVIGATION_DESTINATIONS = (
 
 
 class MainWindow(QMainWindow):
-    """Phase 9A native shell; full feature workflows arrive in Phase 9B."""
+    """Native Daybook workspace backed by one shared application service graph."""
 
     closing = Signal()
 
@@ -60,12 +69,17 @@ class MainWindow(QMainWindow):
         self._current_destination = "today"
         self._view_indexes: dict[str, int] = {}
         self._settings_appearance: QComboBox | None = None
+        self.today_view: TodayView | None = None
+        self.tasks_view: TasksView | None = None
+        self.journal_view: JournalView | None = None
+        self.reports_view: ReportsView | None = None
+        self.assistant_view: AssistantView | None = None
         self._snapshot = services.shell_snapshot()
 
         self.setObjectName("daybookMainWindow")
         self.setWindowTitle("Daybook AI")
-        self.resize(1180, 760)
-        self.setMinimumSize(860, 560)
+        self.resize(1360, 760)
+        self.setMinimumSize(1000, 620)
         self.setStatusBar(QStatusBar(self))
 
         central = QWidget(self)
@@ -105,7 +119,9 @@ class MainWindow(QMainWindow):
         self.navigation.setObjectName("navigation")
         self.navigation.setAccessibleName("Daybook navigation")
         self.navigation.setSpacing(1)
-        self.navigation.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.navigation.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         for destination in NAVIGATION_DESTINATIONS:
             item = QListWidgetItem(destination.label)
             item.setData(Qt.ItemDataRole.UserRole, destination.key)
@@ -117,7 +133,9 @@ class MainWindow(QMainWindow):
         layout.addSpacing(10)
         layout.addWidget(self.navigation, 1)
 
-        principle = QLabel("Rules determine.\nAI explains and proposes.\nHumans approve.")
+        principle = QLabel(
+            "Rules determine.\nAI explains and proposes.\nHumans approve."
+        )
         principle.setObjectName("brandSubtle")
         principle.setWordWrap(True)
         layout.addWidget(principle)
@@ -137,30 +155,51 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget(workspace)
         self.stack.setObjectName("workspaceStack")
-        self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.stack.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
 
-        views = {
-            "today": self._build_today_view(self._snapshot),
-            "tasks": self._placeholder_view(
-                "Tasks",
-                "Task list, detail, dependency, hierarchy, and time-entry "
-                "workflows migrate in Phase 9B.",
-            ),
-            "journal": self._placeholder_view(
-                "Journal",
-                "The native journal editor and journal-to-task workflow migrate in Phase 9B.",
-            ),
-            "reports": self._placeholder_view(
-                "Reports",
-                "Phase 8 reporting remains deterministic and available through "
-                "application services. The native report viewer and export "
-                "controls migrate in Phase 9B.",
-            ),
-            "assistant": self._assistant_view(self._snapshot),
-            "ethical-ai": self._ethical_ai_view(),
-            "about": self._about_view(),
-            "settings": self._settings_view(),
-        }
+        if hasattr(self.services, "task_service"):
+            self.today_view = TodayView(self.services, self)
+            self.tasks_view = TasksView(self.services, self)
+            self.journal_view = JournalView(self.services, self)
+            self.reports_view = ReportsView(self.services, self)
+            self.assistant_view = AssistantView(
+                self.services, self._snapshot.ai_status, self
+            )
+            self.today_view.open_task_requested.connect(self.open_task)
+            self.today_view.journal_requested.connect(lambda: self.navigate("journal"))
+            self.tasks_view.changed.connect(self._refresh_data_views)
+            self.journal_view.changed.connect(self._refresh_data_views)
+            views = {
+                "today": self.today_view,
+                "tasks": self.tasks_view,
+                "journal": self.journal_view,
+                "reports": self.reports_view,
+                "assistant": self.assistant_view,
+                "ethical-ai": ethical_ai_view(self),
+                "about": about_view(self),
+                "settings": self._settings_view(),
+            }
+        else:
+            # Lightweight Phase 9A fakes remain useful for shell-only tests.
+            views = {
+                "today": self._build_today_view(self._snapshot),
+                "tasks": self._placeholder_view(
+                    "Tasks", "Native task workflows use Daybook application services."
+                ),
+                "journal": self._placeholder_view(
+                    "Journal",
+                    "Native journal workflows use Daybook SQLite persistence.",
+                ),
+                "reports": self._placeholder_view(
+                    "Reports", "Native reports reuse deterministic report calculations."
+                ),
+                "assistant": self._assistant_view(self._snapshot),
+                "ethical-ai": self._ethical_ai_view(),
+                "about": self._about_view(),
+                "settings": self._settings_view(),
+            }
         for destination in NAVIGATION_DESTINATIONS:
             index = self.stack.addWidget(views[destination.key])
             self._view_indexes[destination.key] = index
@@ -192,7 +231,10 @@ class MainWindow(QMainWindow):
         metrics.addWidget(MetricCard("Due today", str(snapshot.due_today)), 0, 1)
         metrics.addWidget(MetricCard("Completed", str(snapshot.completed_tasks)), 0, 2)
         metrics.addWidget(
-            MetricCard("Journal today", "Recorded" if snapshot.journal_today else "Not recorded"),
+            MetricCard(
+                "Journal today",
+                "Recorded" if snapshot.journal_today else "Not recorded",
+            ),
             0,
             3,
         )
@@ -276,9 +318,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(card)
         layout.addWidget(
             ContentCard(
-                "Phase 9A scope",
-                "Only desktop-shell appearance is active here. Complete settings "
-                "and model controls migrate in Phase 9B.",
+                "Preference scope",
+                "Appearance remains the only general desktop preference. Report "
+                "fiscal settings stay with the reporting workflow.",
             )
         )
         layout.addStretch(1)
@@ -330,25 +372,26 @@ class MainWindow(QMainWindow):
 
     def _select_destination(self, key: str) -> None:
         index = self._view_indexes[key]
-        destination = next(
-            item for item in NAVIGATION_DESTINATIONS if item.key == key
-        )
+        destination = next(item for item in NAVIGATION_DESTINATIONS if item.key == key)
         self._current_destination = key
         self.stack.setCurrentIndex(index)
         self.page_title.setText(destination.label)
         self.page_subtitle.setText(self._subtitle_for(key))
         self.status_message.setText(f"Viewing {destination.label}")
+        if key == "today" and self.today_view is not None:
+            self.today_view.refresh()
+        elif key == "tasks" and self.tasks_view is not None:
+            self.tasks_view.refresh()
+        elif key == "journal" and self.journal_view is not None:
+            self.journal_view.load()
 
     @staticmethod
     def _subtitle_for(key: str) -> str:
         subtitles = {
-            "today": "A compact read-only view of current Daybook service state.",
-            "tasks": "Native task workflows arrive in Phase 9B.",
-            "journal": "Native daily journal workflows arrive in Phase 9B.",
-            "reports": (
-                "Deterministic reporting services are preserved; desktop "
-                "presentation follows in Phase 9B."
-            ),
+            "today": "Deterministic focus, due work, blockers, completion, and journal status.",
+            "tasks": "Create, update, organize, track, and complete locally stored work.",
+            "journal": "Record progress, blockers, and reflection by calendar date.",
+            "reports": "Deterministic task and time aggregation with native export controls.",
             "assistant": "Bounded local AI remains optional and non-authoritative.",
             "ethical-ai": (
                 "Daybook's governance principle remains unchanged by the desktop "
@@ -358,6 +401,17 @@ class MainWindow(QMainWindow):
             "settings": "Desktop shell preferences and application configuration.",
         }
         return subtitles[key]
+
+    def open_task(self, task_id: int) -> None:
+        if self.tasks_view is None:
+            return
+        self.navigate("tasks")
+        self.tasks_view.open_task(task_id)
+
+    def _refresh_data_views(self) -> None:
+        self._snapshot = self.services.shell_snapshot()
+        if self.today_view is not None:
+            self.today_view.refresh()
 
     def _sync_appearance_control(self, appearance: str) -> None:
         if self._settings_appearance is None:

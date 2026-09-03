@@ -14,11 +14,13 @@ from src.repositories.governance_repository import GovernanceRepository
 from src.repositories.journal_repository import JournalRepository
 from src.repositories.planning_repository import PlanningRepository
 from src.repositories.reporting_repository import ReportingRepository
+from src.repositories.reporting_settings_repository import ReportingSettingsRepository
 from src.repositories.task_repository import TaskRepository
 from src.repositories.time_entry_repository import TimeEntryRepository
 from src.services.context_service import ContextService
 from src.services.planning_service import PlanningService
 from src.services.reporting_service import ReportingService
+from src.services.report_export_service import ReportExportService
 from src.services.task_service import TaskService
 from src.services.time_entry_service import TimeEntryService
 
@@ -97,11 +99,13 @@ class DesktopServices:
     governance: GovernanceRepository
     planning: PlanningRepository
     reporting: ReportingRepository
+    reporting_settings: ReportingSettingsRepository
     task_service: TaskService
     time_entry_service: TimeEntryService
     context_service: ContextService
     planning_service: PlanningService
     reporting_service: ReportingService
+    report_export_service: ReportExportService
     model: LocalModelClient
 
     def shell_snapshot(self, *, today: date | None = None) -> ShellSnapshot:
@@ -137,6 +141,7 @@ def build_desktop_services(config: DesktopCompositionConfig) -> DesktopServices:
     governance = GovernanceRepository(database)
     planning = PlanningRepository(database)
     reporting = ReportingRepository(database)
+    reporting_settings = ReportingSettingsRepository(database)
     model = LocalModelClient(
         config.model_base_url,
         config.model_name,
@@ -153,10 +158,12 @@ def build_desktop_services(config: DesktopCompositionConfig) -> DesktopServices:
         governance=governance,
         planning=planning,
         reporting=reporting,
+        reporting_settings=reporting_settings,
         task_service=task_service,
         time_entry_service=TimeEntryService(time_entries, tasks),
         context_service=ContextService(tasks, journals),
         planning_service=PlanningService(task_service, planning, model),
         reporting_service=ReportingService(reporting),
+        report_export_service=ReportExportService(),
         model=model,
     )
