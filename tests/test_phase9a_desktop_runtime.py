@@ -113,3 +113,76 @@ def test_desktop_runtime_does_not_start_streamlit(
     )
 
     assert runtime.run() == 0
+
+
+def test_desktop_runtime_cleans_owned_model_when_qt_startup_fails(
+    monkeypatch,
+    runtime_config: RuntimeConfig,
+) -> None:
+    _prepare_runtime(monkeypatch, runtime_config)
+    process = object()
+    stopped = []
+    monkeypatch.setattr(runtime, "_start_model", lambda config: (process, True))
+    monkeypatch.setattr(runtime, "_verify_llm", lambda config: True)
+    monkeypatch.setattr(
+        runtime,
+        "_run_qt_application",
+        lambda root: (_ for _ in ()).throw(RuntimeError("Qt startup failed")),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_stop_model_server",
+        lambda config, model_process, owned: stopped.append((model_process, owned)),
+    )
+
+    with pytest.raises(RuntimeError, match="Qt startup failed"):
+        runtime.run()
+
+    assert stopped == [(process, True)]
+
+
+def test_desktop_runtime_repeated_start_close_releases_each_owned_model(
+    monkeypatch,
+    runtime_config: RuntimeConfig,
+) -> None:
+    _prepare_runtime(monkeypatch, runtime_config)
+    processes = iter([object(), object()])
+    stopped = []
+    monkeypatch.setattr(runtime, "_start_model", lambda config: (next(processes), True))
+    monkeypatch.setattr(runtime, "_verify_llm", lambda config: True)
+    monkeypatch.setattr(runtime, "_run_qt_application", lambda root: 0)
+    monkeypatch.setattr(
+        runtime,
+        "_stop_model_server",
+        lambda config, model_process, owned: stopped.append((model_process, owned)),
+    )
+
+    assert runtime.run() == 0
+    assert runtime.run() == 0
+    assert len(stopped) == 2
+    assert all(owned for _, owned in stopped)
+
+
+def test_desktop_runtime_preserves_external_model_on_qt_failure(
+    monkeypatch,
+    runtime_config: RuntimeConfig,
+) -> None:
+    _prepare_runtime(monkeypatch, runtime_config)
+    stopped = []
+    monkeypatch.setattr(runtime, "_start_model", lambda config: (None, False))
+    monkeypatch.setattr(runtime, "_verify_llm", lambda config: True)
+    monkeypatch.setattr(
+        runtime,
+        "_run_qt_application",
+        lambda root: (_ for _ in ()).throw(RuntimeError("Qt startup failed")),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_stop_model_server",
+        lambda config, model_process, owned: stopped.append((model_process, owned)),
+    )
+
+    with pytest.raises(RuntimeError, match="Qt startup failed"):
+        runtime.run()
+
+    assert stopped == [(None, False)]

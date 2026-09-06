@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 from PySide6.QtWidgets import QApplication
 
@@ -23,6 +23,15 @@ class DesktopApplication:
     services: DesktopServices
     appearance: AppearanceManager
     owns_application: bool
+    closed: bool = False
+
+    def close(self) -> None:
+        """Close the native window and drain its pending close event once."""
+        if self.closed:
+            return
+        self.window.close()
+        self.application.processEvents()
+        self.closed = True
 
 
 def _ensure_application(argv: Sequence[str] | None = None) -> tuple[QApplication, bool]:
@@ -67,4 +76,7 @@ def run_desktop_application(project_root: Path) -> int:
     desktop.window.show()
     if not desktop.owns_application:
         return 0
-    return int(desktop.application.exec())
+    try:
+        return int(desktop.application.exec())
+    finally:
+        desktop.close()

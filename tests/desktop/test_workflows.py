@@ -4,13 +4,15 @@ import json
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSplitter,
     QToolButton,
 )
 
@@ -21,10 +23,10 @@ from src.desktop.dialogs import TaskDialog
 from src.desktop.views import (
     AssistantView,
     JournalView,
+    ProposalReviewDialog,
     ReportsView,
     TasksView,
     TodayView,
-    ProposalReviewDialog,
 )
 from src.models.entities import JournalEntry
 
@@ -76,6 +78,51 @@ def test_real_desktop_constructs_every_workflow_once(qapp, tmp_path: Path) -> No
         desktop.window.reports_view.services.reporting_service
         is desktop.services.reporting_service
     )
+    desktop.window.close()
+
+
+def test_task_names_retain_readable_column_width(qapp, tmp_path: Path) -> None:
+    desktop = make_desktop(qapp, tmp_path)
+    view = desktop.window.tasks_view
+    assert view is not None
+    task = view.create_task(task_values("A task title that must remain visible"))
+    desktop.window.show()
+    qapp.processEvents()
+
+    splitter = view.findChild(QSplitter, "taskWorkspaceSplitter")
+    item = view.tree.currentItem()
+    assert splitter is not None
+    assert splitter.orientation() == Qt.Orientation.Vertical
+    assert splitter.handleWidth() >= 8
+    assert view.tree.minimumHeight() == 180
+    assert view.tree.columnWidth(0) >= 150
+    assert item is not None
+    assert item.text(0) == task.title
+    assert item.text(1) == "Task"
+    assert item.toolTip(0) == task.title
+    assert not splitter.childrenCollapsible()
+    desktop.window.close()
+
+
+def test_task_hierarchy_labels_epics_and_subtasks(qapp, tmp_path: Path) -> None:
+    desktop = make_desktop(qapp, tmp_path)
+    view = desktop.window.tasks_view
+    assert view is not None
+    epic = view.create_task(task_values("Release epic"))
+    child = view.services.task_service.add_subtask(
+        int(epic.id), **task_values("Validate packaging")
+    )
+    view.refresh()
+
+    epic_item = view.tree.topLevelItem(0)
+    assert epic_item.text(0) == epic.title
+    assert epic_item.text(1) == "Epic"
+    assert epic_item.font(0).bold()
+    assert epic_item.childCount() == 1
+    assert not epic_item.isExpanded()
+    assert epic_item.child(0).text(0) == child.title
+    assert epic_item.child(0).text(1) == "Subtask"
+    assert view.findChild(QLabel, "taskDetailTitle").text().startswith("Epic ·")
     desktop.window.close()
 
 
@@ -256,6 +303,26 @@ def test_reports_preserve_sunday_week_and_epic_cumulative_time(
     assert view.report.report_range.end_date == date(2026, 9, 5)
     assert view.report.roots[0].display_minutes == 90
     assert view.report.grand_total_minutes == 90
+    desktop.window.close()
+
+
+def test_report_export_uses_native_save_dialog(qapp, tmp_path: Path, monkeypatch) -> None:
+    desktop = make_desktop(qapp, tmp_path)
+    view = desktop.window.reports_view
+    assert view is not None
+    destination = tmp_path / "native-report.pdf"
+    calls = []
+
+    def choose_file(parent, title, suggested):
+        calls.append((parent, title, suggested))
+        return str(destination), "PDF"
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", choose_file)
+    view._export("summary.pdf")
+
+    assert destination.read_bytes().startswith(b"%PDF")
+    assert calls[0][0] is view
+    assert calls[0][1] == "Export report"
     desktop.window.close()
 
 

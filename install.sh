@@ -164,7 +164,7 @@ say "Environment setup is complete."
 say "Activation is not required; Daybook can be launched with .venv/bin/python directly."
 
 if [ "$NO_LAUNCH" -eq 0 ]; then
-    if confirm "Launch Daybook AI now? The existing Daybook launcher may download missing llama.cpp/model runtime components on first launch."; then
+    if confirm "Launch the Daybook AI desktop application now? Missing llama.cpp/model runtime components may be downloaded on first launch."; then
         exec "$VENV_PY" "$ROOT/run.py"
     fi
 fi

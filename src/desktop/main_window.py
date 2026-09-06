@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QPushButton,
     QSizePolicy,
     QStackedWidget,
     QStatusBar,
@@ -21,7 +22,6 @@ from PySide6.QtWidgets import (
 
 from src.desktop.composition import DesktopServices, ShellSnapshot
 from src.desktop.theme import AppearanceManager
-from src.desktop.widgets import ContentCard, MetricCard
 from src.desktop.views import (
     AssistantView,
     JournalView,
@@ -31,6 +31,7 @@ from src.desktop.views import (
     about_view,
     ethical_ai_view,
 )
+from src.desktop.widgets import ContentCard, MetricCard
 from src.runtime.preferences import VALID_APPEARANCES
 
 
@@ -79,7 +80,7 @@ class MainWindow(QMainWindow):
         self.setObjectName("daybookMainWindow")
         self.setWindowTitle("Daybook AI")
         self.resize(1360, 760)
-        self.setMinimumSize(1000, 620)
+        self.setMinimumSize(900, 600)
         self.setStatusBar(QStatusBar(self))
 
         central = QWidget(self)
@@ -281,7 +282,8 @@ class MainWindow(QMainWindow):
             "About Daybook AI",
             "Daybook AI is a local-first task manager, daily journal, deterministic "
             "reporting system, and bounded local AI assistant. Phase 9A adds the "
-            "native PySide6 foundation without removing Streamlit yet.",
+            "native PySide6 application while retaining Streamlit as a temporary "
+            "legacy option.",
         )
 
     def _settings_view(self) -> QWidget:
@@ -316,6 +318,25 @@ class MainWindow(QMainWindow):
         card_layout.addWidget(hint)
         card_layout.addWidget(combo)
         layout.addWidget(card)
+        shutdown_card = QFrame(view)
+        shutdown_card.setObjectName("contentCard")
+        shutdown_layout = QVBoxLayout(shutdown_card)
+        shutdown_layout.setContentsMargins(16, 14, 16, 14)
+        shutdown_title = QLabel("Application lifecycle")
+        shutdown_title.setStyleSheet("font-weight: 600;")
+        shutdown_hint = QLabel(
+            "Close Daybook and release only the local AI process owned by this run."
+        )
+        shutdown_hint.setObjectName("mutedText")
+        shutdown_hint.setWordWrap(True)
+        shutdown = QPushButton("Shut down Daybook AI")
+        shutdown.setObjectName("shutdownDesktopButton")
+        shutdown.setAccessibleName("Shut down Daybook AI")
+        shutdown.clicked.connect(self.close)
+        shutdown_layout.addWidget(shutdown_title)
+        shutdown_layout.addWidget(shutdown_hint)
+        shutdown_layout.addWidget(shutdown)
+        layout.addWidget(shutdown_card)
         layout.addWidget(
             ContentCard(
                 "Preference scope",

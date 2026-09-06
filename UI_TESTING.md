@@ -1,5 +1,36 @@
 # Daybook AI UI testing
 
+The native PySide6 suite is the authoritative Phase 9C UI acceptance path.
+Streamlit AppTest and Playwright remain as legacy regression coverage until
+Phase 10 decides which browser-era tooling can be removed.
+
+## Native desktop suite
+
+Run all native desktop tests with Qt offscreen rendering:
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m pytest -q tests/desktop
+```
+
+The suite covers application construction, one shared composition graph,
+Light/Dark appearance persistence, keyboard focus, task and journal workflows,
+dependencies, epic/subtask time behavior, reports, native file-dialog exports,
+assistant fallback, proposal review, and close signaling.
+
+Capture native screenshots to a location outside the repository:
+
+```bash
+python scripts/capture_desktop.py \
+  --output-dir ~/Downloads/daybook-desktop-validation \
+  --theme both
+```
+
+Add `--offscreen` for a headless host with the necessary Qt runtime libraries.
+The capture tool copies the selected SQLite database into a temporary directory,
+so screenshot generation does not modify the authoritative database.
+
+## Legacy browser suite
+
 This package adds automated UI tests without replacing application source
 files.
 
@@ -71,7 +102,7 @@ python scripts/run_ui_tests.py
 The runner:
 
 1. Copies the current SQLite database to a temporary test location.
-2. Starts `python run.py`.
+2. Starts `python run.py --streamlit`.
 3. Waits for the controller at `http://127.0.0.1:8500`.
 4. Runs Streamlit AppTest checks.
 5. Runs Playwright browser tests.
@@ -114,7 +145,7 @@ These are fast and do not require Chrome.
 Start Daybook AI in one terminal:
 
 ```bash
-python run.py
+python run.py --streamlit
 ```
 
 In a second terminal:
@@ -157,12 +188,12 @@ The included tests cover:
 ## Important limitation
 
 No UI suite can prove every possible combination of user input. Keep the
-existing repository/service unit tests. The intended stack is:
+existing repository/service unit tests. The Phase 9C validation stack is:
 
 1. Unit tests for models, repositories, and services
-2. Streamlit AppTest for widget-level behavior
-3. Playwright for real browser workflows
-4. One manual visual review for layout and wording
+2. PySide6 offscreen tests for native widget behavior
+3. Native macOS lifecycle and visual validation
+4. Streamlit AppTest and Playwright as temporary legacy regression evidence
 
 
 ## Streamlit navigation implementation note

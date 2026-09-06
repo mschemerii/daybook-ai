@@ -1372,7 +1372,7 @@ st.markdown(
 
 detected_gpu = os.getenv(
     "DAYBOOK_DETECTED_GPU",
-    "Not checked—start with python run.py",
+    "Not checked—start with python run.py --streamlit",
 )
 detected_backend = os.getenv(
     "DAYBOOK_DETECTED_BACKEND",

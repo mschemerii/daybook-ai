@@ -184,7 +184,7 @@ Write-Step "Environment setup is complete."
 Write-Step "Activation is not required; Daybook uses .venv's Python directly."
 
 if (-not $NoLaunch) {
-    if (Confirm-Step "Launch Daybook AI now? The existing Daybook launcher may download missing llama.cpp/model runtime components on first launch.") {
+    if (Confirm-Step "Launch the Daybook AI desktop application now? Missing llama.cpp/model runtime components may be downloaded on first launch.") {
         & $VenvPython (Join-Path $Root "run.py")
         exit $LASTEXITCODE
     }

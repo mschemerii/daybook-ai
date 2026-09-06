@@ -91,6 +91,8 @@ def _verify_dependencies() -> list[str]:
     streamlit = _package_version("streamlit")
     requests = _package_version("requests")
     dotenv = _package_version("python-dotenv")
+    reportlab = _package_version("reportlab")
+    pyside6 = _package_version("PySide6")
 
     if streamlit != "1.56.0":
         errors.append(
@@ -105,6 +107,16 @@ def _verify_dependencies() -> list[str]:
     if dotenv is None or not ((1, 0, 0) <= _version_tuple(dotenv) < (2, 0, 0)):
         errors.append(
             f"python-dotenv >=1.0,<2 is required; found {dotenv or 'not installed'}."
+        )
+
+    if reportlab is None or not ((5, 0, 0) <= _version_tuple(reportlab) < (6, 0, 0)):
+        errors.append(
+            f"reportlab >=5,<6 is required; found {reportlab or 'not installed'}."
+        )
+
+    if pyside6 is None or not ((6, 10, 1) <= _version_tuple(pyside6) < (7, 0, 0)):
+        errors.append(
+            f"PySide6 >=6.10.1,<7 is required; found {pyside6 or 'not installed'}."
         )
 
     return errors

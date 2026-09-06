@@ -58,7 +58,8 @@ A recorded Daybook AI v0.9 walkthrough demonstrates installation, local-model st
 Daybook AI uses:
 
 - **Python 3.12.x** for the application runtime.
-- **Streamlit 1.56.0** for the user interface.
+- **PySide6 / Qt for Python** for the authoritative native desktop interface.
+- **Streamlit 1.56.0** as a temporary explicit legacy interface during cutover.
 - **SQLite** for local persistent data.
 - **llama.cpp** for local model serving.
 - **Qwen3.5-0.8B GGUF** as the default local model.
@@ -172,9 +173,8 @@ When Daybook AI starts, `run.py` checks the local runtime and handles missing lo
 5. Use an existing GGUF model or download the default Qwen model when none is available.
 6. Start the authenticated llama.cpp server.
 7. Send a real test request to `/v1/chat/completions` before reporting AI inference as verified.
-8. Start Streamlit and the loopback-only browser controller.
-9. Open Daybook AI at `http://127.0.0.1:8500`.
-10. Keep task and journal functionality available in limited mode if local AI cannot be started or verified.
+8. Open the native PySide6 application without starting a browser.
+9. Keep task, journal, reporting, and export functionality available in limited mode if local AI cannot be started or verified.
 
 Internet access is needed only when a missing runtime component or model must be downloaded. Daybook AI does not use cloud AI for normal task, journal, or assistant processing.
 
@@ -227,12 +227,14 @@ The command-line modes are mutually exclusive.
 
 | Command | Purpose |
 |---|---|
-| `python run.py` | Start Daybook AI, bootstrap/verify the local AI runtime, start Streamlit, and open the browser. |
-| `python run.py --status` | Report whether the managed Daybook AI instance is running. |
-| `python run.py --stop` | Request the same authenticated graceful shutdown used by the in-app **Shut down** control. |
-| `python run.py --screenshots light` | Start the app, capture the implemented pages in light mode, then stop launcher-owned services. |
-| `python run.py --screenshots dark` | Capture the implemented pages in dark mode. |
-| `python run.py --screenshots both` | Capture both light and dark screenshot sets. |
+| `python run.py` | Start the native Daybook AI desktop application and bootstrap/verify local AI. |
+| `python run.py --desktop` | Explicit alias for the default native desktop mode. |
+| `python run.py --streamlit` | Start the legacy Streamlit interface and browser controller. |
+| `python run.py --status` | Report legacy managed-runtime status during the transition. |
+| `python run.py --stop` | Request graceful shutdown of a legacy managed runtime. |
+| `python run.py --streamlit --screenshots light` | Capture legacy Streamlit pages in light mode. |
+| `python run.py --streamlit --screenshots dark` | Capture legacy Streamlit pages in dark mode. |
+| `python run.py --streamlit --screenshots both` | Capture both legacy screenshot sets. |
 | `python run.py --help` | Show the launcher help text. |
 
 The wrapper scripts forward launcher options, so these also work:
@@ -240,7 +242,8 @@ The wrapper scripts forward launcher options, so these also work:
 ```bash
 ./run.sh --status
 ./run.sh --stop
-./run.sh --screenshots both
+./run.sh --streamlit
+./run.sh --streamlit --screenshots both
 ```
 
 Windows equivalents:
@@ -248,31 +251,35 @@ Windows equivalents:
 ```bat
 run.bat --status
 run.bat --stop
-run.bat --screenshots both
+run.bat --streamlit
+run.bat --streamlit --screenshots both
 ```
 
 ## Shutdown behavior
 
-The preferred shutdown method is the **Shut down** control in the Daybook AI interface.
+Close the native Daybook AI window or use **Settings > Shut down Daybook AI**.
+The launcher then terminates llama.cpp only when that exact process was started
+and owned by the current Daybook run. An independently started llama.cpp server
+is left running.
 
-The browser moves to a stable local goodbye page, Streamlit stops, and llama.cpp is terminated only when Daybook AI started that process. An externally managed llama.cpp server is left running.
-
-Terminal shutdown is also available:
+The legacy Streamlit runtime retains its authenticated in-app and terminal
+shutdown behavior:
 
 ```bash
 python run.py --stop
 ```
 
-The launcher stores only the local controller information needed to manage the running instance in the git-ignored `.daybook-runtime.json` file and removes it during normal shutdown.
+Only the legacy launcher stores controller information in the git-ignored
+`.daybook-runtime.json` file, and it removes that file during normal shutdown.
 
 ## Capture screenshots
 
 Google Chrome must already be installed. Playwright uses the installed Chrome channel.
 
 ```bash
-python run.py --screenshots light
-python run.py --screenshots dark
-python run.py --screenshots both
+python run.py --streamlit --screenshots light
+python run.py --streamlit --screenshots dark
+python run.py --streamlit --screenshots both
 ```
 
 Captured images are written to:
@@ -280,6 +287,13 @@ Captured images are written to:
 ```text
 docs/screenshots/light/
 docs/screenshots/dark/
+```
+
+Native desktop validation screenshots use a caller-selected directory outside
+the repository:
+
+```bash
+python scripts/capture_desktop.py --output-dir ~/Downloads/daybook-desktop-validation --theme both
 ```
 
 The tracked project currently includes Today, Tasks, Daily Journal, Assistant, About, Ethical AI, and Task Detail screenshots in both themes.

@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from argparse import Namespace
 from pathlib import Path
 
@@ -27,6 +29,32 @@ def test_owned_model_server_uses_managed_process_handle(monkeypatch):
     launcher._stop_model_server(None, process, True)  # type: ignore[arg-type]
 
     assert calls == [(process, "llama.cpp")]
+
+
+def test_owned_model_process_is_reaped() -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        text=True,
+        start_new_session=True,
+    )
+
+    launcher._stop_model_server(None, process, True)  # type: ignore[arg-type]
+
+    assert process.poll() is not None
+
+
+def test_external_model_process_is_preserved() -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        launcher._stop_model_server(None, process, False)  # type: ignore[arg-type]
+        assert process.poll() is None
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
 
 
 def test_environment_is_loaded_before_bootstrap(monkeypatch):
@@ -174,3 +202,69 @@ def test_model_command_enforces_local_security(monkeypatch, tmp_path: Path):
     assert "--no-webui" in captured["command"]
     assert "--api-key" not in captured["command"]
     assert captured["environment"]["LLAMA_API_KEY"] == "secret-model-key"
+
+
+def test_model_start_failure_returns_limited_mode(monkeypatch, tmp_path: Path):
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"model")
+    config = RuntimeConfig(
+        project_root=tmp_path,
+        model_path=model,
+        llama_server="missing-llama-server",
+        model_host="127.0.0.1",
+        model_port=8080,
+        streamlit_host="127.0.0.1",
+        streamlit_port=8501,
+        controller_host="127.0.0.1",
+        controller_port=8500,
+        context_size=4096,
+        gpu_layers=0,
+        model_api_key="model-token",
+        controller_token="controller-token",
+    )
+    monkeypatch.setattr(launcher, "_is_http_ready", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("not executable")),
+    )
+
+    assert launcher._start_model(config) == (None, False)
+
+
+def test_model_readiness_timeout_stops_owned_process(monkeypatch, tmp_path: Path):
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"model")
+    config = RuntimeConfig(
+        project_root=tmp_path,
+        model_path=model,
+        llama_server="llama-server",
+        model_host="127.0.0.1",
+        model_port=8080,
+        streamlit_host="127.0.0.1",
+        streamlit_port=8501,
+        controller_host="127.0.0.1",
+        controller_port=8500,
+        context_size=4096,
+        gpu_layers=0,
+        model_api_key="model-token",
+        controller_token="controller-token",
+    )
+
+    class Process:
+        def poll(self):
+            return None
+
+    process = Process()
+    stopped = []
+    monkeypatch.setattr(launcher, "_is_http_ready", lambda *args, **kwargs: False)
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(launcher.time, "sleep", lambda value: None)
+    monkeypatch.setattr(
+        launcher,
+        "_stop_process",
+        lambda candidate, label: stopped.append((candidate, label)),
+    )
+
+    assert launcher._start_model(config) == (None, False)
+    assert stopped == [(process, "llama.cpp")]
