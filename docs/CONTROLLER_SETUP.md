@@ -1,18 +1,20 @@
 # Controller-based startup and shutdown
 
-Daybook AI uses three loopback-only services:
+The explicit legacy Streamlit mode uses three loopback-only services:
 
 - Controller: `http://127.0.0.1:8500`
 - Streamlit: `http://127.0.0.1:8501`
 - llama.cpp: `http://127.0.0.1:8080`
 
-Run normally:
+Run the legacy interface:
 
 ```bash
-python run.py
+python run.py --streamlit
 ```
 
-The browser opens the controller URL on port 8500. The controller embeds the
+Normal `python run.py` startup opens the native PySide6 application and does
+not use this controller or open a browser. In legacy mode, the browser opens
+the controller URL on port 8500. The controller embeds the
 Streamlit application and remains available during shutdown.
 
 When the user selects **Shut down**:

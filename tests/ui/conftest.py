@@ -41,7 +41,7 @@ def app_frame(
         raise AssertionError(
             "The Daybook AI controller did not expose the Streamlit "
             f"iframe at {controller_url}. Start the app with "
-            "`python run.py` or use `python scripts/run_ui_tests.py`."
+            "`python run.py --streamlit` or use `python scripts/run_ui_tests.py`."
         ) from exc
 
     frame = page.frame_locator("iframe")

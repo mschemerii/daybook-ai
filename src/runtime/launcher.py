@@ -259,13 +259,17 @@ def _start_model(
 
     environment = os.environ.copy()
     environment["LLAMA_API_KEY"] = config.model_api_key
-    process = subprocess.Popen(
-        command,
-        cwd=config.project_root,
-        env=environment,
-        text=True,
-        start_new_session=True,
-    )
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=config.project_root,
+            env=environment,
+            text=True,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        print(f"llama-server could not be started: {exc}", flush=True)
+        return None, False
 
     for _ in range(120):
         if process.poll() is not None:
@@ -277,7 +281,8 @@ def _start_model(
         time.sleep(0.5)
 
     print("Local AI server did not become ready.", flush=True)
-    return process, True
+    _stop_process(process, "llama.cpp")
+    return None, False
 
 
 def _verify_llm(config: RuntimeConfig) -> bool:

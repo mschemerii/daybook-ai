@@ -46,4 +46,8 @@ def test_desktop_application_constructs_without_event_loop(qapp, tmp_path: Path)
     assert desktop.window.windowTitle() == "Daybook AI"
     assert desktop.window.current_destination == "today"
     assert services.calls == 1
-    desktop.window.close()
+    desktop.close()
+    desktop.close()
+
+    assert desktop.closed is True
+    assert not desktop.window.isVisible()

@@ -9,9 +9,8 @@ from dotenv import load_dotenv
 from src.runtime.bootstrap import bootstrap_runtime
 from src.runtime.hardware import detect_hardware
 
-# Phase 9A reuses the proven model lifecycle helpers while Streamlit remains a
-# supported migration reference. Phase 9C can extract a shared public runtime
-# boundary when the desktop launcher becomes authoritative.
+# Reuse the proven process helpers while Streamlit remains an explicit legacy
+# option. Ownership is carried by the process handle returned from _start_model.
 from src.runtime.launcher import (
     _http_origin,
     _start_model,
@@ -19,7 +18,6 @@ from src.runtime.launcher import (
     _verify_llm,
     load_runtime_config,
 )
-
 
 
 def _pyside6_available() -> bool:
@@ -33,10 +31,10 @@ def _run_qt_application(project_root: Path) -> int:
 
 
 def run() -> int:
-    """Launch the Phase 9A native shell while preserving model ownership rules."""
+    """Launch the native application while preserving model ownership rules."""
     if not _pyside6_available():
         print(
-            "PySide6 is not installed. Install requirements.txt before using --desktop.",
+            "PySide6 is not installed. Install requirements.txt before starting Daybook AI.",
             flush=True,
         )
         return 1
@@ -65,15 +63,16 @@ def run() -> int:
     os.environ["DAYBOOK_DETECTED_GPU"] = hardware.gpu_name or "CPU only"
     os.environ["DAYBOOK_DETECTED_BACKEND"] = bootstrap.backend
 
-    model_process, model_owned = _start_model(config)
-    _verify_llm(config)
-
+    model_process = None
+    model_owned = False
     try:
+        model_process, model_owned = _start_model(config)
+        _verify_llm(config)
         return _run_qt_application(project_root)
     except ModuleNotFoundError as exc:
         if exc.name and exc.name.startswith("PySide6"):
             print(
-                "PySide6 is not installed. Install requirements.txt before using --desktop.",
+                "PySide6 is not installed. Install requirements.txt before starting Daybook AI.",
                 flush=True,
             )
             return 1

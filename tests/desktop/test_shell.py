@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox
+from PySide6.QtWidgets import QComboBox, QPushButton
 
 from src.desktop.composition import ShellSnapshot
 from src.desktop.main_window import MainWindow
@@ -127,6 +127,23 @@ def test_close_emits_lifecycle_signal(qapp, tmp_path: Path) -> None:
     window.show()
     qapp.processEvents()
     window.close()
+    qapp.processEvents()
+
+    assert events == ["closing"]
+    assert not window.isVisible()
+
+
+def test_explicit_shutdown_control_closes_application(qapp, tmp_path: Path) -> None:
+    appearance = AppearanceManager(qapp, tmp_path / "prefs.json")
+    window = MainWindow(make_services(), appearance)  # type: ignore[arg-type]
+    events: list[str] = []
+    window.closing.connect(lambda: events.append("closing"))
+    shutdown = window.findChild(QPushButton, "shutdownDesktopButton")
+
+    assert shutdown is not None
+    window.show()
+    qapp.processEvents()
+    shutdown.click()
     qapp.processEvents()
 
     assert events == ["closing"]

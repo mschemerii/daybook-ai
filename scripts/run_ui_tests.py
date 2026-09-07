@@ -140,6 +140,7 @@ def main() -> int:
             [
                 sys.executable,
                 "run.py",
+                "--streamlit",
             ],
             cwd=PROJECT_ROOT,
             env=environment,

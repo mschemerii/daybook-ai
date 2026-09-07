@@ -396,18 +396,33 @@ class TasksView(QWidget):
         toolbar.addStretch(1)
         toolbar.addWidget(self.show_completed)
         layout.addLayout(toolbar)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # A vertical master-detail layout keeps the task hierarchy readable in a
+        # normal-sized window. The horizontal divider remains user-adjustable.
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setObjectName("taskWorkspaceSplitter")
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(8)
         self.tree = QTreeWidget()
         self.tree.setObjectName("taskTree")
-        self.tree.setHeaderLabels(["Task", "Priority", "Due", "Status"])
-        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.setMinimumHeight(180)
+        self.tree.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.tree.setHeaderLabels(["Task", "Type", "Priority", "Due", "Status"])
+        header = self.tree.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column, width in ((1, 84), (2, 84), (3, 108), (4, 84)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+            header.resizeSection(column, width)
         self.tree.currentItemChanged.connect(self._selection_changed)
         splitter.addWidget(self.tree)
         self.detail = QWidget()
+        self.detail.setMinimumHeight(260)
         self.detail_layout = QVBoxLayout(self.detail)
         splitter.addWidget(self.detail)
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
+        splitter.setSizes([280, 420])
         layout.addWidget(splitter, 1)
         self.refresh()
 
@@ -415,12 +430,24 @@ class TasksView(QWidget):
         item = QTreeWidgetItem(
             [
                 task.title,
+                (
+                    "Epic"
+                    if task.task_type == "epic"
+                    else "Subtask"
+                    if task.parent_task_id is not None
+                    else "Task"
+                ),
                 task.priority,
                 task.due_date.isoformat() if task.due_date else "—",
                 task.status,
             ]
         )
         item.setData(0, Qt.ItemDataRole.UserRole, int(task.id))
+        item.setToolTip(0, task.title)
+        if task.task_type == "epic":
+            font = item.font(0)
+            font.setBold(True)
+            item.setFont(0, font)
         if self.services.task_service.is_blocked(int(task.id)):
             item.setForeground(0, QBrush(QColor("#c75b39")))
         for child in self.services.tasks.list_subtasks(int(task.id)):
@@ -435,7 +462,7 @@ class TasksView(QWidget):
             include_completed=self.show_completed.isChecked()
         ):
             self.tree.addTopLevelItem(self._tree_item(task))
-        self.tree.expandAll()
+        self.tree.collapseAll()
         if selected is not None:
             matches = self.tree.findItems(
                 "*", Qt.MatchFlag.MatchWildcard | Qt.MatchFlag.MatchRecursive, 0
@@ -470,7 +497,10 @@ class TasksView(QWidget):
         while self.detail_layout.count():
             item = self.detail_layout.takeAt(0)
             if item.widget():
-                item.widget().deleteLater()
+                widget = item.widget()
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
 
     def _render_empty(self) -> None:
         self._clear_detail()
@@ -597,7 +627,8 @@ class TasksView(QWidget):
         except KeyError:
             self._render_empty()
             return
-        title = QLabel(task.title)
+        type_label = "Epic" if task.task_type == "epic" else "Task"
+        title = QLabel(f"{type_label} · {task.title}")
         title.setObjectName("taskDetailTitle")
         title.setStyleSheet("font-size: 20px; font-weight: 700;")
         self.detail_layout.addWidget(title)
