@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.lifecycle_helpers import recorded_task, recorded_subtask, record_time
+
 from datetime import date
 
 import pytest
@@ -60,7 +62,7 @@ def test_first_subtask_converts_parent_without_changing_original_fields(
 
 def test_completed_subtasks_keep_parent_as_epic(task_repo, task_service):
     parent = task_service.create_task(title="Project")
-    child = task_service.add_subtask(
+    child = recorded_subtask(task_service,
         parent.id,
         title="Finished step",
         status="Completed",
@@ -88,13 +90,14 @@ def test_epic_can_close_only_after_every_subtask_is_complete(
     task_service,
 ):
     parent = task_service.create_task(title="Project")
-    first = task_service.add_subtask(parent.id, title="Finished", status="Completed")
+    first = recorded_subtask(task_service, parent.id, title="Finished", status="Completed")
     second = task_service.add_subtask(parent.id, title="Still open")
 
     with pytest.raises(ValueError, match="Incomplete: Still open"):
         task_service.complete_task(parent.id)
 
     assert task_repo.get(parent.id).status == "Open"
+    record_time(task_service, second.id)
     task_service.complete_task(second.id)
     closed = task_service.complete_task(parent.id)
 
@@ -105,7 +108,7 @@ def test_epic_can_close_only_after_every_subtask_is_complete(
 
 def test_reopening_subtask_reopens_closed_epic(task_repo, task_service):
     parent = task_service.create_task(title="Project")
-    child = task_service.add_subtask(
+    child = recorded_subtask(task_service,
         parent.id,
         title="Finished",
         status="Completed",
@@ -124,7 +127,7 @@ def test_reopening_nested_subtask_reopens_all_closed_ancestors(
 ):
     root = task_service.create_task(title="Root")
     middle = task_service.add_subtask(root.id, title="Middle")
-    leaf = task_service.add_subtask(middle.id, title="Leaf", status="Completed")
+    leaf = recorded_subtask(task_service, middle.id, title="Leaf", status="Completed")
     task_service.complete_task(middle.id)
     task_service.complete_task(root.id)
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.lifecycle_helpers import recorded_task, recorded_subtask, record_time
+
 import ast
 from pathlib import Path
 
@@ -7,7 +9,7 @@ from src.models.entities import Task
 
 
 def test_completed_tasks_can_be_reopened(task_repo, task_service):
-    created = task_repo.create(Task(None, "Finished", status="Completed"))
+    created = recorded_task(task_service, title="Finished")
     completed = task_service.completed()
     assert [task.id for task in completed] == [created.id]
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.lifecycle_helpers import recorded_task, recorded_subtask, record_time
+
 from datetime import date
 
 import pytest
@@ -85,6 +87,7 @@ def test_multiple_prerequisites_block_until_every_one_completes(task_service):
         second.id,
     }
 
+    record_time(task_service, first.id)
     task_service.complete_task(first.id)
 
     assert [
@@ -92,6 +95,7 @@ def test_multiple_prerequisites_block_until_every_one_completes(task_service):
     ] == [second.id]
     assert task_service.is_blocked(dependent.id)
 
+    record_time(task_service, second.id)
     task_service.complete_task(second.id)
 
     assert task_service.blocking_prerequisites(dependent.id) == []
@@ -103,6 +107,7 @@ def test_blocked_task_cannot_be_completed(task_service, task_repo):
     dependent = task_service.create_task(title="Dependent")
     task_service.add_dependency(dependent.id, prerequisite.id)
 
+    record_time(task_service, dependent.id)
     with pytest.raises(ValueError, match="Prerequisite"):
         task_service.complete_task(dependent.id)
 
@@ -136,8 +141,8 @@ def test_removing_one_dependency_recalculates_remaining_blockers(task_service):
 
 
 def test_direct_reopening_cascade_requires_confirmation(task_service, task_repo):
-    prerequisite = task_service.create_task(title="Approved", status="Completed")
-    dependent = task_service.create_task(title="Released", status="Completed")
+    prerequisite = recorded_task(task_service, title="Approved", status="Completed")
+    dependent = recorded_task(task_service, title="Released", status="Completed")
     task_service.add_dependency(dependent.id, prerequisite.id)
 
     with pytest.raises(ReopenConfirmationRequired) as warning:
@@ -161,9 +166,9 @@ def test_transitive_reopening_cascade_names_and_reopens_every_dependent(
     task_service,
     task_repo,
 ):
-    first = task_service.create_task(title="Design", status="Completed")
-    second = task_service.create_task(title="Build", status="Completed")
-    third = task_service.create_task(title="Ship", status="Completed")
+    first = recorded_task(task_service, title="Design", status="Completed")
+    second = recorded_task(task_service, title="Build", status="Completed")
+    third = recorded_task(task_service, title="Ship", status="Completed")
     task_service.add_dependency(second.id, first.id)
     task_service.add_dependency(third.id, second.id)
 
@@ -187,8 +192,8 @@ def test_reopen_preview_is_a_cancel_path_with_no_record_changes(
     task_repo,
     dependency_repo,
 ):
-    prerequisite = task_service.create_task(title="Approved", status="Completed")
-    dependent = task_service.create_task(title="Released", status="Completed")
+    prerequisite = recorded_task(task_service, title="Approved", status="Completed")
+    dependent = recorded_task(task_service, title="Released", status="Completed")
     dependency_repo.create(dependent.id, prerequisite.id)
     before = {
         task.id: (task.status, task.updated_at)
@@ -209,7 +214,7 @@ def test_already_open_dependent_stays_open_and_becomes_blocked(
     task_service,
     task_repo,
 ):
-    prerequisite = task_service.create_task(title="Approved", status="Completed")
+    prerequisite = recorded_task(task_service, title="Approved", status="Completed")
     dependent = task_service.create_task(title="Follow-up", status="Open")
     task_service.add_dependency(dependent.id, prerequisite.id)
 
@@ -227,12 +232,12 @@ def test_dependency_cascade_preserves_subtask_ancestor_reopening(
     task_repo,
 ):
     epic = task_service.create_task(title="Epic")
-    prerequisite = task_service.add_subtask(
+    prerequisite = recorded_subtask(task_service,
         epic.id,
         title="Epic step",
         status="Completed",
     )
-    dependent = task_service.create_task(title="Outside task", status="Completed")
+    dependent = recorded_task(task_service, title="Outside task", status="Completed")
     task_service.complete_task(epic.id)
     task_service.add_dependency(dependent.id, prerequisite.id)
 
@@ -359,7 +364,7 @@ def test_append_conversion_has_no_parent_dependency_deadlock(
     task_repo,
 ):
     epic = task_service.create_task(title="Release epic")
-    first_step = task_service.add_subtask(
+    first_step = recorded_subtask(task_service,
         epic.id,
         title="First step",
         status="Completed",
@@ -368,6 +373,7 @@ def test_append_conversion_has_no_parent_dependency_deadlock(
     task_service.add_dependency(dependent.id, epic.id)
     task_service.append_dependent_to_epic(dependent.id, epic.id)
 
+    record_time(task_service, dependent.id)
     task_service.complete_task(dependent.id)
     completed_epic = task_service.complete_task(epic.id)
 
@@ -381,7 +387,7 @@ def test_append_to_completed_nested_epic_reopens_completed_ancestors(
 ):
     root = task_service.create_task(title="Root epic")
     inner = task_service.add_subtask(root.id, title="Inner epic")
-    original_step = task_service.add_subtask(
+    original_step = recorded_subtask(task_service,
         inner.id,
         title="Original step",
         status="Completed",

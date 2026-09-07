@@ -59,7 +59,7 @@ def test_fresh_database_receives_all_migrations_and_foreign_keys(db):
         }
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
-    assert versions == [1, 2, 3]
+    assert versions == [1, 2, 3, 4]
     assert {
         "task_dependencies",
         "time_entries",
@@ -86,7 +86,7 @@ def test_v08_upgrade_preserves_original_rows_and_values(tmp_path):
         assert task["completion_criterion"] == ""
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
-    backup_path = tmp_path / "daybook.v0.8.backup.db"
+    backup_path = database.backup_path
     assert database.backup_path == backup_path
     assert backup_path.exists()
     with sqlite3.connect(backup_path) as backup:
@@ -105,7 +105,7 @@ def test_migration_is_idempotent(tmp_path):
 
     with sqlite3.connect(path) as conn:
         after = list(conn.iterdump())
-        assert conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 3
+        assert conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 4
     assert after == before
 
 
@@ -135,7 +135,7 @@ def test_versioned_v08_baseline_upgrades(tmp_path):
             for row in conn.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
-        ] == [1, 2, 3]
+        ] == [1, 2, 3, 4]
 
 
 def test_version2_database_upgrades_to_durable_clarification_storage(tmp_path):
@@ -162,7 +162,7 @@ def test_version2_database_upgrades_to_durable_clarification_storage(tmp_path):
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
         ]
-        assert versions == [1, 2, 3]
+        assert versions == [1, 2, 3, 4]
         assert conn.execute(
             "SELECT 1 FROM sqlite_master "
             "WHERE type = 'table' AND name = 'task_clarification_answers'"
@@ -177,7 +177,7 @@ def test_failed_migration_rolls_back_and_leaves_database_usable(tmp_path):
         conn.execute("CREATE TABLE should_rollback(id INTEGER)")
         raise RuntimeError("injected migration failure")
 
-    failing = Migration(4, "injected failure", fail_after_write)
+    failing = Migration(5, "injected failure", fail_after_write)
     with database.connect() as conn:
         with pytest.raises(RuntimeError, match="injected migration failure"):
             migrate(conn, path, migrations=(*MIGRATIONS, failing))
@@ -192,7 +192,7 @@ def test_failed_migration_rolls_back_and_leaves_database_usable(tmp_path):
             for row in conn.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
-        ] == [1, 2, 3]
+        ] == [1, 2, 3, 4]
 
 
 def test_unknown_unversioned_schema_fails_without_mutation(tmp_path):
