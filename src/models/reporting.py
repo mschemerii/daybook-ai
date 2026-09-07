@@ -40,6 +40,8 @@ class ReportRange:
 class ReportingSnapshot:
     tasks: tuple[Task, ...]
     entries: tuple[TimeEntry, ...]
+    lifecycle: tuple[dict, ...] = ()
+    blocks: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,10 +68,11 @@ class ReportResult:
     detailed_entries: tuple[TimeEntry, ...]
     current_tasks_in_progress: tuple[Task, ...]
     grand_total_minutes: int
+    completions: tuple[dict, ...] = ()
 
     @property
     def has_activity(self) -> bool:
-        return bool(self.detailed_entries)
+        return bool(self.detailed_entries or self.completions)
 
     def iter_nodes(self) -> tuple[ReportTaskNode, ...]:
         result: list[ReportTaskNode] = []

@@ -50,10 +50,13 @@ class ReportingRepository:
         if start_date > end_date:
             raise ValueError("Report range start date must be on or before end date.")
         with self.db.connect() as conn:
+            conn.execute("BEGIN")
             task_rows = conn.execute("SELECT * FROM tasks ORDER BY id").fetchall()
             entry_rows = conn.execute(
                 "SELECT * FROM time_entries ORDER BY id"
             ).fetchall()
+            lifecycle = tuple(dict(row) for row in conn.execute("SELECT * FROM task_lifecycle ORDER BY id"))
+            blocks = tuple(dict(row) for row in conn.execute("SELECT * FROM task_block_intervals ORDER BY id"))
         entries = tuple(self._entry_from_row(row) for row in entry_rows)
         return ReportingSnapshot(
             tuple(self._task_from_row(row) for row in task_rows),
@@ -62,4 +65,6 @@ class ReportingRepository:
                 for entry in entries
                 if start_date <= entry.work_date <= end_date
             ),
+            lifecycle,
+            blocks,
         )

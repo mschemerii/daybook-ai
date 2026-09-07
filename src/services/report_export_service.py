@@ -164,6 +164,9 @@ class ReportExportService:
 
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w") as archive:
+            if report.completions:
+                archive.writestr('completions.csv', self._csv_bytes(
+                    tuple(report.completions[0]), list(report.completions)))
             for name, payload in (
                 ("tasks.csv", task_csv),
                 ("time_entries.csv", entry_csv),
@@ -304,6 +307,18 @@ class ReportExportService:
                 story.append(
                     Paragraph(f"• {escape(task.title)} - due {due}", normal_style)
                 )
+        story.extend(self._completion_story(report))
+        return story
+
+    def _completion_story(self, report):
+        _, heading, normal, _ = self._styles()
+        story = [Paragraph('Completed work and legacy records', heading)]
+        story.append(Paragraph('Completion dates are UTC. Unknown legacy dates are not assigned to this period. Actual effort is captured at closure; blocker time is observed wall-clock duration, not proven causal delay.', normal))
+        for row in report.completions:
+            text = ' | '.join(f'{key}: {value if value is not None else "Unknown"}' for key, value in row.items())
+            story.extend([Paragraph(escape(text), normal), Spacer(1, 6)])
+        if not report.completions:
+            story.append(Paragraph('No completed work in this period or legacy closed records.', normal))
         return story
 
     def export_summary_pdf(self, report: ReportResult) -> bytes:
@@ -411,5 +426,6 @@ class ReportExportService:
             for task in report.current_tasks_in_progress:
                 due = task.due_date.isoformat() if task.due_date else "No due date"
                 story.append(Paragraph(f"• {escape(task.title)} - due {due}", normal_style))
+        story.extend(self._completion_story(report))
         document.build(story)
         return output.getvalue()

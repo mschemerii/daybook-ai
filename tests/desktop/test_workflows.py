@@ -221,6 +221,7 @@ def test_task_create_edit_complete_and_reopen_through_native_view(
 
     updated = view.update_selected({"title": "Edited native task", "priority": "High"})
     assert updated.title == "Edited native task"
+    desktop.services.time_entry_service.create(task.id, work_date=date.today(), minutes=30)
     desktop.services.task_service.complete_task(task.id)
     assert desktop.services.tasks.get(task.id).status == "Completed"
     desktop.services.task_service.reopen_task(task.id)

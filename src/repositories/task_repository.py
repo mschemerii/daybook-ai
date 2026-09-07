@@ -55,6 +55,8 @@ class TaskRepository:
 
     @staticmethod
     def _insert(conn, task: Task, *, parent_task_id=None, subtask_order=None) -> int:
+        if task.status == "Completed":
+            raise ValueError("Create the task open, record time, then complete it.")
         cur = conn.execute(
             """INSERT INTO tasks(
                    title, description, priority, due_date, status, source, notes,
@@ -278,6 +280,14 @@ class TaskRepository:
             current = self._task_row(conn, task_id)
             if values.get("status") == "Completed":
                 self._assert_epic_can_complete(conn, task_id)
+                if current["status"] != "Completed":
+                    family = conn.execute("""WITH RECURSIVE family(id) AS (
+                        SELECT ? UNION ALL SELECT t.id FROM tasks t
+                        JOIN family f ON t.parent_task_id=f.id
+                    ) SELECT COALESCE(SUM(minutes),0) FROM time_entries
+                    WHERE task_id IN (SELECT id FROM family)""", (task_id,)).fetchone()[0]
+                    if family <= 0:
+                        raise ValueError("Record time before completing this task. Epics require recorded subtask time.")
             conn.execute(
                 f"UPDATE tasks SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 params,

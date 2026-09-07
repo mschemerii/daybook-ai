@@ -12,6 +12,7 @@ from src.models.reporting import (
 )
 from src.repositories.reporting_repository import ReportingRepository
 from src.utils.report_ranges import monthly_range
+from src.services.completion_reporting import completion_rows
 
 
 class ReportingService:
@@ -172,4 +173,5 @@ class ReportingService:
             detailed_entries=detailed_entries,
             current_tasks_in_progress=current_tasks,
             grand_total_minutes=grand_total_minutes,
+            completions=completion_rows(snapshot, report_range),
         )

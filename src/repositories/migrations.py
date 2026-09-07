@@ -4,6 +4,8 @@ import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from datetime import datetime, timezone
+from src.repositories.lifecycle_schema import install_lifecycle
 
 
 BASELINE_TABLES = {
@@ -287,6 +289,7 @@ MIGRATIONS = (
         "v0.9 Phase 7.5 durable task clarification answers",
         _upgrade_to_v09_phase7_5,
     ),
+    Migration(4, "Phase 9C completion and blocker history", install_lifecycle),
 )
 
 
@@ -322,6 +325,8 @@ def _validate_v09(
 ) -> None:
     tables = _table_names(conn)
     expected_tables = V09_PHASE2_TABLES if version == 2 else V09_TABLES
+    if version is not None and version >= 4:
+        expected_tables = expected_tables | {"task_lifecycle", "task_block_intervals"}
     missing = expected_tables - tables
     unexpected = tables - expected_tables
     if missing or unexpected or _columns(conn, "tasks") != V09_TASK_COLUMNS:
@@ -341,9 +346,8 @@ def _backup_path(db_path: Path) -> Path:
 
 
 def _create_backup(conn: sqlite3.Connection, db_path: Path) -> Path:
-    backup_path = _backup_path(db_path)
-    if backup_path.exists():
-        return backup_path
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    backup_path = db_path.with_name(f"{db_path.stem}.pre-migration-{stamp}.db")
     with sqlite3.connect(backup_path) as backup:
         conn.backup(backup)
     return backup_path

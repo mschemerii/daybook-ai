@@ -1234,8 +1234,11 @@ class ReportsView(QWidget):
         self.summary.setObjectName("reportSummary")
         layout.addWidget(self.summary)
         self.table = QTreeWidget()
-        self.table.setHeaderLabels(["Task", "Estimate", "Subtask estimate", "Recorded"])
-        self.table.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.setHeaderLabels(["Task", "Estimate", "Subtask estimate", "Recorded", "Variance", "Observed blocked", "History"])
+        self.table.header().setStretchLastSection(False)
+        self.table.header().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(0, 340)
         layout.addWidget(self.table, 1)
         exports = QHBoxLayout()
         pdf = QPushButton("Export summary PDF")
@@ -1304,6 +1307,25 @@ class ReportsView(QWidget):
         for root in self.report.roots:
             add(root)
         self.table.expandAll()
+        # Completion history is selected by closure date, not time-entry date.
+        group = QTreeWidgetItem(["Completed work (UTC) / legacy date unknown", "", "", ""])
+        self.table.addTopLevelItem(group)
+        for row in self.report.completions:
+            child = QTreeWidgetItem([
+                f"{row['title']} — {row['completed_at']}",
+                str(row['estimate_hours']) + "h" if row['estimate_hours'] is not None else "Unknown",
+                "—",
+                f"{row['actual_minutes']}m" if row['actual_minutes'] is not None else "Unknown",
+                f"{row['variance_minutes']}m" if row['variance_minutes'] is not None else "Unknown",
+                f"{row['blocked_minutes']}m" if row['blocked_minutes'] is not None else "Unknown",
+                row['history_quality'],
+            ])
+            child.setToolTip(0, f"Elapsed: {row['elapsed_hours']}h; observed blocked: {row['blocked_minutes']}m. "
+                f"{row['history_quality']}. {row['blocker_reasons']}")
+            group.addChild(child)
+        group.setExpanded(True)
+        if not self.report.roots and not self.report.completions:
+            self.summary.setText(self.summary.text() + " · No recorded time or completions in this period.")
 
     def _export(self, suffix: str) -> None:
         if self.report is None:
