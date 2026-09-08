@@ -7,7 +7,7 @@ Revision: Streamlit is no longer a required interface. The target is a local-fir
 | Item | Detail |
 | --- | --- |
 | Repository | github.com/mschemerii/daybook-ai |
-| Current GitHub main reviewed | c4257d30d9e3d41dce0be1677dbd0862a7b2a5ea |
+| Current GitHub main reviewed | c1db480c34082d0515cd62ffe9f382da47d74829 |
 | Desktop framework target | PySide6 / Qt for Python |
 | Core principle | Rules determine. AI explains. AI proposes. Humans approve. |
 
@@ -43,11 +43,13 @@ Every remaining phase or major desktop subphase uses its own branch and pull req
 
 | Work item | Scope | Branch | PR target | Status |
 | --- | --- | --- | --- | --- |
-| Phase 8 | Deterministic reports, PDF, CSV ZIP | agent/v0.9-phase8-reporting-exports | main | Next |
-| Phase 9A | Desktop foundation and shell | agent/v0.9-phase9a-desktop-foundation | main | Pending |
-| Phase 9B | Desktop workflow migration | agent/v0.9-phase9b-desktop-workflows | main | Pending |
-| Phase 9C | Desktop cutover, lifecycle, packaging validation | agent/v0.9-phase9c-desktop-cutover | main | Pending |
-| Phase 10 | Repository cleanup, documentation, final validation, release prep | chore/v0.9-phase10-desktop-cleanup-release | main | Pending |
+| Phase 8 | Deterministic reports, PDF, CSV ZIP | agent/v0.9-phase8-reporting-exports | main | Complete |
+| Phase 9A | Desktop foundation and shell | agent/v0.9-phase9a-desktop-foundation | main | Complete |
+| Phase 9B | Desktop workflow migration | agent/v0.9-phase9b-desktop-workflows | main | Complete |
+| Phase 9C | Desktop cutover, lifecycle, packaging validation | agent/v0.9-phase9c-desktop-cutover | main | Complete |
+| Phase 10 | Repository cleanup, documentation, final validation, release prep | chore/v0.9-phase10-desktop-cleanup-release | main | In progress |
+| Phase 11 | UI/report presentation refinements, expanded decomposition, Assistant functionality | TBD after requirements approval | main | Planned |
+| Phase 12 | GitHub Actions executable builds and GitHub Release distribution | TBD after packaging decisions | main | Planned |
 
 ## 4. Phase 8 - Reports, PDF, and CSV ZIP export
 
@@ -229,3 +231,18 @@ Phase 8 remains the next implementation phase. The desktop redesign does not beg
 ---
 
 *Markdown transcription of the approved Daybook AI v0.9 Desktop Application Phase Plan. GitHub `main` remains the implementation source of truth.*
+
+## 13. Post-v0.9 roadmap sequence
+
+Phase 10 remains cleanup, documentation, final validation, and release
+preparation only.
+
+Phase 11 is reserved for user-proposed UI/report presentation refinements,
+expanded AI task decomposition, and Assistant functionality. Specific
+requirements must be obtained and approved before implementation.
+
+Phase 12 is reserved for GitHub Actions executable builds for macOS, Windows,
+and Linux plus separately approved GitHub Release distribution. Packaging
+frameworks, supported architectures, build runners, llama.cpp/model handling,
+writable data locations, install/upgrade behavior, signing/notarization,
+checksums, credentials, and paid services require explicit Phase 12 decisions.

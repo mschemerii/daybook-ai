@@ -6,15 +6,19 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_phase9a_adds_pyside6_without_removing_streamlit() -> None:
-    requirements = (PROJECT_ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+def test_phase10_runtime_dependency_set_is_native_only() -> None:
+    requirements = (PROJECT_ROOT / "requirements.txt").read_text(
+        encoding="utf-8"
+    ).splitlines()
 
     assert any(line.startswith("PySide6>=") for line in requirements)
-    assert "streamlit==1.56.0" in requirements
+    assert all("streamlit" not in line.lower() for line in requirements)
 
 
 def test_desktop_runtime_has_no_browser_or_streamlit_startup_path() -> None:
-    source = (PROJECT_ROOT / "src/desktop/runtime.py").read_text(encoding="utf-8").lower()
+    source = (PROJECT_ROOT / "src/desktop/runtime.py").read_text(
+        encoding="utf-8"
+    ).lower()
 
     assert "import streamlit" not in source
     assert "_start_streamlit" not in source
@@ -24,7 +28,9 @@ def test_desktop_runtime_has_no_browser_or_streamlit_startup_path() -> None:
 
 
 def test_desktop_composition_uses_existing_application_layers_directly() -> None:
-    source = (PROJECT_ROOT / "src/desktop/composition.py").read_text(encoding="utf-8")
+    source = (PROJECT_ROOT / "src/desktop/composition.py").read_text(
+        encoding="utf-8"
+    )
 
     expected_imports = (
         "src.repositories.database",

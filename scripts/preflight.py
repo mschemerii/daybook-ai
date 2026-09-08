@@ -88,16 +88,10 @@ def _package_version(name: str) -> str | None:
 def _verify_dependencies() -> list[str]:
     errors: list[str] = []
 
-    streamlit = _package_version("streamlit")
     requests = _package_version("requests")
     dotenv = _package_version("python-dotenv")
     reportlab = _package_version("reportlab")
     pyside6 = _package_version("PySide6")
-
-    if streamlit != "1.56.0":
-        errors.append(
-            f"Streamlit 1.56.0 is required; found {streamlit or 'not installed'}."
-        )
 
     if requests is None or not ((2, 32, 0) <= _version_tuple(requests) < (3, 0, 0)):
         errors.append(
@@ -149,7 +143,7 @@ def main() -> int:
     else:
         info.append(f"Python: {platform.python_version()} ({sys.executable})")
 
-    required_files = ("run.py", "app.py", "requirements.txt", ".env.example")
+    required_files = ("run.py", "requirements.txt", ".env.example", "src/desktop/application.py", "src/runtime/model_runtime.py")
     for name in required_files:
         if not (PROJECT_ROOT / name).exists():
             errors.append(f"Required project file is missing: {name}")

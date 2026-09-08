@@ -7,7 +7,7 @@ import pytest
 from src.desktop import runtime
 from src.runtime.bootstrap import BootstrapResult
 from src.runtime.hardware import HardwareInfo
-from src.runtime.launcher import RuntimeConfig
+from src.runtime.model_runtime import RuntimeConfig
 
 
 @pytest.fixture
@@ -18,14 +18,9 @@ def runtime_config(tmp_path: Path) -> RuntimeConfig:
         llama_server=None,
         model_host="127.0.0.1",
         model_port=8080,
-        streamlit_host="127.0.0.1",
-        streamlit_port=8501,
-        controller_host="127.0.0.1",
-        controller_port=8500,
         context_size=4096,
         gpu_layers=0,
         model_api_key="model-token",
-        controller_token="controller-token",
     )
 
 
@@ -93,26 +88,6 @@ def test_desktop_runtime_continues_when_model_is_unavailable(
     assert runtime.run() == 0
     assert stopped == [(None, False)]
 
-
-def test_desktop_runtime_does_not_start_streamlit(
-    monkeypatch,
-    runtime_config: RuntimeConfig,
-) -> None:
-    _prepare_runtime(monkeypatch, runtime_config)
-    monkeypatch.setattr(runtime, "_start_model", lambda config: (None, False))
-    monkeypatch.setattr(runtime, "_verify_llm", lambda config: False)
-    monkeypatch.setattr(runtime, "_run_qt_application", lambda root: 0)
-    monkeypatch.setattr(runtime, "_stop_model_server", lambda *args: None)
-
-    import src.runtime.launcher as launcher
-
-    monkeypatch.setattr(
-        launcher,
-        "_start_streamlit",
-        lambda *args: pytest.fail("desktop runtime must not start Streamlit"),
-    )
-
-    assert runtime.run() == 0
 
 
 def test_desktop_runtime_cleans_owned_model_when_qt_startup_fails(
