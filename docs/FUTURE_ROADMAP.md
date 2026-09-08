@@ -1,7 +1,25 @@
-# Future Roadmap
+# Daybook AI Roadmap
 
-Daybook AI intentionally contains one bounded assistant. Possible future modules include a planning specialist, journal summarizer, blocker-review assistant, meeting-note importer, and privacy/audit reviewer. Each should remain permission-scoped and should communicate through explicit typed requests rather than unrestricted shared access.
+## Phase 10 — current
 
-A future multi-agent architecture could place a small orchestrator above these specialists, with policy enforcement, provenance, confirmation gates, and a shared local audit layer. Agents would receive least-privilege read tools and return recommendations or proposed actions.
+Repository cleanup, documentation, final validation, and v0.9 release
+preparation. Phase 11 and Phase 12 are not implemented during Phase 10.
 
-Multi-agent functionality is outside the current prototype. The present project does not dynamically create agents, delegate autonomously, communicate externally, or permit any model to write directly to application data.
+## Phase 11 — backlog boundary
+
+Phase 11 is reserved for user-proposed UI and report-presentation refinements,
+expanded AI task decomposition, and Assistant functionality.
+
+Specific refinement requirements must be gathered and approved before
+implementation.
+
+## Phase 12 — executable desktop builds
+
+Phase 12 will use GitHub Actions to build executable desktop applications for
+macOS, Windows, and Linux and, after approval, publish release artifacts through
+GitHub Releases.
+
+Phase 12 must explicitly decide the packaging framework, supported
+architectures, build runners, llama.cpp/model handling, writable data
+locations, install/upgrade behavior, signing/notarization, checksums,
+credentials, and any paid services.

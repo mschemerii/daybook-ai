@@ -1,26 +1,68 @@
 # Ethical AI Implementation
 
-## Implemented safeguards
+> **Rules determine. AI explains. AI proposes. Humans approve.**
 
-| Principle | Implemented software feature |
-|---|---|
-| Human autonomy | The assistant has read-only context. Writes use `ProposedAction`; `TaskService` rejects writes that do not require confirmation. External communication and commitment changes are prohibited. |
-| Privacy | Tasks, journals, memories, and audit history use local SQLite. The model endpoint is local and configurable. No analytics or telemetry code exists. |
-| Transparency | Today labels deterministic selection as application rules. Assistant output is labeled local AI interpretation. Consulted records are displayed. |
-| Accountability | Audit records store request, consulted provenance, recommendation, and approval state. Users may delete one record or all records. |
-| Data minimization | `ContextService` sends limited fields, caps task/journal counts, omits task descriptions and notes, and truncates journal fields. |
-| Meaningful oversight | The model cannot access repositories. Application services alone write. AI-originated write proposals require confirmation and schema validation. |
-| User-controlled memory | Retention is unchecked by default. Stored memories can be inspected, edited, and deleted. |
-| No surveillance | No time, keystroke, application, productivity-score, or peer-comparison data model or UI exists. |
+## Implemented controls
 
-## Prohibited actions
+- Deterministic services remain authoritative for task state, focus rules,
+  dependencies, time-entry rules, completion enforcement, reporting, exports,
+  and SQLite writes.
+- AI explanations are grounded in application-supplied facts and have a
+  deterministic fallback.
+- AI decomposition is proposal-only. Application code validates the structure,
+  and persistence occurs only after explicit human approval.
+- The application remains usable when the model is unavailable.
+- Task, journal, audit, reporting, and governance data remain local in SQLite.
+- The managed model service is loopback-only.
+- Daybook terminates llama.cpp only when it started and owns that process.
+- The assistant has no unrestricted browser, email, shell, or file-system tools.
+- No telemetry, productivity scoring, keystroke surveillance, or peer ranking
+  is implemented.
 
-The bounded design prohibits email, messaging, web browsing, command execution, unrestricted file access, surveillance, automatic deletion of source information, and changing commitments.
+## Todd May — Decency Principle
 
-## Future goals, not currently implemented
+In the course framing of Todd May's Decency Principle, ordinary moral regard
+for other people should remain part of practical action rather than treating
+people merely as instruments or obstacles. Daybook's relevant design choice is
+to keep the user as the decision-maker: the model may explain and propose, but
+consequential persistence remains subject to application rules and explicit
+human approval.
 
-- Encryption-at-rest with user-managed keys.
-- Structured proposal extraction and confirmation UI for every supported assistant write request.
-- Fine-grained record picker rather than category-level task/journal consent.
-- Exportable audit reports and retention schedules.
-- Formal accessibility testing and external ethical review.
+This is an ethical design connection, not a claim that the software can prove
+or enforce human decency.
+
+## Floridi and Cowls
+
+Daybook aligns conceptually with their five-principle framework:
+
+- **Beneficence:** AI is used for practical assistance rather than unnecessary
+  automation.
+- **Non-maleficence:** invalid model output is rejected and model failure
+  degrades safely.
+- **Autonomy:** the user retains approval authority and the application remains
+  useful without AI.
+- **Justice:** deterministic rules provide consistent application behavior;
+  this is not a claim of population-level fairness.
+- **Explicability:** deterministic facts are separated from AI wording and
+  application code owns persistence/accountability.
+
+## NIST AI RMF conceptual alignment
+
+Daybook is **not NIST-certified** and does not claim full AI RMF
+implementation. Its design has conceptual alignment with the AI RMF Core:
+
+- **Govern:** explicit AI authority boundaries and approval requirements.
+- **Map:** local-first use, model limits, and failure modes are documented.
+- **Measure:** tests exercise grounding, fallback, migrations, lifecycle,
+  reporting, and exports.
+- **Manage:** invalid AI output is rejected, model failure degrades to limited
+  mode, and externally managed llama.cpp processes are preserved.
+
+## Current limitations
+
+- No encryption-at-rest with user-managed keys.
+- No external independent ethical audit.
+- No formal fairness evaluation across demographic groups.
+- Small local models may produce weak or malformed output.
+- No certification or compliance claim is made from these framework
+  alignments.

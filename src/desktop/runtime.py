@@ -8,10 +8,7 @@ from dotenv import load_dotenv
 
 from src.runtime.bootstrap import bootstrap_runtime
 from src.runtime.hardware import detect_hardware
-
-# Reuse the proven process helpers while Streamlit remains an explicit legacy
-# option. Ownership is carried by the process handle returned from _start_model.
-from src.runtime.launcher import (
+from src.runtime.model_runtime import (
     _http_origin,
     _start_model,
     _stop_model_server,
