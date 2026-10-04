@@ -31,13 +31,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
 
-      - name: Install dependencies
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           python -m venv .venv
-          if runner.os == 'Windows':
-            & .\.venv\Scripts\Activate.ps1
-          else:
-            source .venv/bin/activate
+          & .\.venv\Scripts\Activate.ps1
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Install dependencies (macOS/Linux)
+        if: runner.os != 'Windows'
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
