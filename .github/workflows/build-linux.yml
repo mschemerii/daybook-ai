@@ -8,6 +8,9 @@ on:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    concurrency:
+      group: build-linux-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v4
