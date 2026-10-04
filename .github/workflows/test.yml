@@ -22,10 +22,19 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
+
       - name: Install dependencies
         run: |
           python -m venv .venv
-          . .venv/bin/activate
+          if runner.os == 'Windows':
+            & .\.venv\Scripts\Activate.ps1
+          else:
+            source .venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
