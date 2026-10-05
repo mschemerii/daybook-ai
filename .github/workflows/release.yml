@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download macOS build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: daybook-macos
+
+      - name: Download Windows build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: daybook-windows
+
+      - name: Download Linux build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: daybook-linux
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            daybook-macos/DaybookAI.app
+            daybook-windows/DaybookAI.exe
+            daybook-linux/DaybookAI
+          generate_release_notes: true

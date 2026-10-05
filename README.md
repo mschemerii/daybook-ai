@@ -1,5 +1,10 @@
 # Daybook AI
 
+[![CI](https://github.com/mschemerii/daybook-ai/actions/workflows/test.yml/badge.svg)](https://github.com/mschemerii/daybook-ai/actions/workflows/test.yml)
+[![Build macOS](https://github.com/mschemerii/daybook-ai/actions/workflows/build-macos.yml/badge.svg)](https://github.com/mschemerii/daybook-ai/actions/workflows/build-macos.yml)
+[![Build Windows](https://github.com/mschemerii/daybook-ai/actions/workflows/build-windows.yml/badge.svg)](https://github.com/mschemerii/daybook-ai/actions/workflows/build-windows.yml)
+[![Build Linux](https://github.com/mschemerii/daybook-ai/actions/workflows/build-linux.yml/badge.svg)](https://github.com/mschemerii/daybook-ai/actions/workflows/build-linux.yml)
+
 Daybook AI is a local-first PySide6 desktop task manager and daily journal with
 bounded local AI.
 
