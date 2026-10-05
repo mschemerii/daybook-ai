@@ -51,6 +51,14 @@ jobs:
           pip install pytest
 
       - name: Run test suite (offscreen)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM='offscreen'
+          .venv/bin/python -m pytest tests/ -q --tb=short
+
+      - name: Run test suite (offscreen)
+        if: runner.os != 'Windows'
         run: |
           QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/ -q --tb=short
 
